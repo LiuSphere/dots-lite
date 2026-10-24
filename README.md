@@ -1,189 +1,110 @@
 # dots-lite
 
-云端 Agent 固定采用 服务器 上的 Hermes，通过微信协调自己电脑上的 Codex 任务。参考 Dots 的本地任务控制与 Claude Duet 的任务、产物和通知组织，先做日常可用的轻量实现。
+**Run and follow up on Codex tasks on your own computer, through Hermes chat.**
 
-项目状态：Hub、执行端和 Hermes MCP 已实现，真实 Codex、跨机器文件传输及 Hermes 核验已通过。实际微信收发与多用户现场验收仍在验证；完整结果见[验收记录](docs/验收记录.md)和[实现进度](docs/实现进度.md)。
+[简体中文](README.zh-CN.md) · [User guide](docs/使用指南.md) · [Deployment guide](docs/运行指南.md) · [Releases](https://github.com/LiuSphere/dots-lite/releases)
 
-当前主线：各用户的 Codex 执行端运行专用控制服务，直接接入官方 Codex app-server；服务器 上各 Hermes profile 只操作其用户绑定的执行端。当前先验证 Windows，其他用户执行端的操作系统尚未核实。重点是 Codex 会话控制与任务文件获取：支持产物自动回传，也允许 Hermes 主动查询、读取和下载授权任务文件。文件写入和通用 Shell 按具体场景后续评估。HAPI 保留为备选。
-
-复用边界：不修改 Hermes 源码、内部数据库结构或 Agent 循环。MCP 客户端、人工确认、后台 runs 与微信收发复用 Hermes；会话历史、审批等待、线程内 Goal、文件与命令接口复用 Codex app-server。我们只补跨机器授权与传输、业务任务/操作记录、暂停意图、累计恢复预算、核验和交付。具体能力与未验证范围见实现方案第 13、16 节。
-
-使用入口：[微信用户使用指南](docs/使用指南.md)、[管理员部署与运行指南](docs/运行指南.md)、[部署 skill](skills/dots-lite-deploy/SKILL.md)。
-
-部署 skill 会收集服务器免交互 SSH 密钥路径、免密 sudo、目标 profile、双端部署目录及授权文件夹。仓库中的账号、地址和目录示例均为占位值；真实部署记录、私钥、token 和聊天标识保存在仓库外或被忽略的私有目录。通用记录格式见[部署记录模板](docs/部署记录模板.md)。
-
-相关材料：[需求](docs/需求.md)、[详细实现方案](docs/详细实现方案.md)、[Hermes 运行说明](adapters/hermes/README.md)。需求定义范围与验收，方案解释实现方式，验收记录区分真实运行与协议替身。
-
-## 开发与检查
+Your code and Codex run on your computer. Hermes receives chat requests, a Linux Hub routes tasks to the paired computer, and results return to the correct profile. Continue a session, add instructions, stop work, handle approvals, and let Hermes inspect actual files before delivering the result.
 
 ```text
-cmd/hub/                 Go 远端服务入口
-cmd/executor/            Go 执行端入口
-internal/protocol/       两端共用业务协议
-internal/hub/            授权、任务、事件与业务跟进
-internal/executor/       Codex 进程、会话与授权文件操作
-internal/store/          SQLite 事务存储
-adapters/hermes/         Python 薄适配包与 uv 环境
-docs/                    需求与详细实现方案
+Chat / WeChat
+    │
+    ▼
+Hermes profile ── MCP + trusted-source plugin ── Linux Hub
+                                                  ▲
+                                  Private WebSocket, outbound from executor
+                                                  │
+                                           Windows executor
+                                                  │ stdio
+                                           Codex app-server
+                                                  │
+                                           Authorized folders
 ```
 
-Go 模块为 `dots-lite`，使用 Go 1.27.3、WebSocket、SQLite 与系统进程控制。依赖及校验在 `go.mod` 和 `go.sum`。Hub 依赖 Linux Unix socket 的真实对端 UID，不在 Windows 上提供降级身份认证。
+## Features
 
-Python 适配包采用 uv，使用 Python `>=3.14,<3.15` 与 MCP 2.0.0；锁文件位于 `adapters/hermes/`。来源插件仅依赖标准库，可在 Hermes 自己的 Python 中加载。MCP worker 与 Hermes 环境分别安装，不复制模型、微信或管理员凭据。
+- **Use your own environment.** Keep your Codex login, dependencies and working directories on your computer.
+- **Authorize folders.** Allow one or more roots, then choose an existing subdirectory for each task without registering every project.
+- **Track work across sessions.** Persist task IDs, sessions, operations and events so reconnects and chat changes do not lose task identity.
+- **Route questions and approvals.** Send answers to the correct task, turn and pending request.
+- **Transfer and verify files.** Accept attachments, read or download task files, acquire artifacts, and record verification and delivery separately.
+- **Isolate users.** Check the Linux UID, profile, executor and trusted chat source. Run business services under unprivileged accounts.
 
-在项目根目录执行：
+For example, after authorizing `C:\work`, ask in chat:
 
-```powershell
-go mod download
-go mod verify
-go fmt ./...
-go vet ./...
-New-Item -ItemType Directory -Path dist -Force
-go build -o dist/hub.exe ./cmd/hub
-go build -o dist/executor.exe ./cmd/executor
-uv sync --project adapters/hermes --locked
-```
+> Fix the login failure in the `demo` folder. Check the cause first, then return the test results and changed files.
 
-普通 `go test ./...` 不启动真实模型。显式设置 `DOTS_LITE_REAL_CODEX=1` 后，集成测试才在临时项目调用真实 Codex，验证文件及重启后继续原会话。执行端使用 `-config <私有 JSON>` 常驻运行，也可用 `-probe` 做无模型就绪检查。Hub 在 Linux 使用 `-config`、`-state`、`-socket`、`-listen` 启动；所有实际验收范围均见验收记录。
+You can then query the task, add instructions or stop the current execution. The working directory must already exist inside an authorized root. Model instructions cannot expand folder access.
 
-## 需求范围
+## Get started
 
-首版以 [需求](docs/需求.md)的 R01—R13 为准：授权路由、机器/Codex 就绪查询、项目选择、多会话、稳定任务列表、追加与停止、审批与问题、异步通知、文件获取、结果核验、恢复、Hermes 集成与可靠的自动异常处理。
+The current deployment targets **Linux Hub + Windows executor + Hermes**. The Hub authenticates local callers through Unix socket peer credentials. Executors connect outbound over a controlled network. The Hub has no built-in TLS; use a private network or an authenticated encrypted tunnel.
 
-Hermes 主动跟进 Codex，先自行查证并处理目标、权限和恢复路径明确的异常。只有仍不明确、需要新授权、必须人工介入或达到恢复预算时才询问用户。关键事件必须可靠唤醒正确 profile，并记录实际处理、后续动作和核验；遗漏补查属于首版，不依赖用户另订阅定时简报。
-
-项目卡片扩展、搜索、日志片段、Git 查询、命令模板、打包预览、待处理汇总和定时简报列为 E01—E08 后续增强，不是首版已具备或必须同时完成的功能。复用 Hermes 原有会话、后台、多 Agent、调度、记忆和 Skills，不另建云端 Agent 框架。
-
-## 使用场景
-
-在微信里告诉 Hermes：“在本机某个项目里完成这件事。”本机 Codex 执行任务，Hermes 回传进度、需要回答的问题和最终结果。用户可以继续追问、中途补充要求、停止当前执行，并在需要时审批操作。
-
-## 已确认的需求
-
-- 保留 服务器 上的 Hermes 和微信入口。
-- 服务器 上存在多个 Hermes profile，每个 profile 由不同的人使用，各自使用不同机器上的 Codex 执行端。这里的执行端指不同的电脑，不是同一机器上的不同进程或会话。这是用户确认的现有使用方式，不是待扩展的单用户模型。
-- 任务实际在对应用户的执行端运行，使用该端的项目与 Codex 环境。当前 Windows 端作为首个验证对象，不能将其路径和凭据套用到其他执行端。
-- 支持创建任务、查看状态、继续同一对话、中途补充要求、停止当前执行。
-- 一个 profile 可以控制其绑定电脑上的多个已授权 Codex 会话，按项目、会话和当前回合准确选择目标；不将一台机器等同于一个会话。
-- 提供稳定任务编号与列表，保存目标、项目、会话、执行、验证和交付状态；Hermes 切换 session 后仍可重新查询和选择，不只靠聊天记忆跟踪。
-- 任务结束后，控制服务依据交付清单核对并回传授权产物，使 Hermes 能实际取得文件，而非只收到 Windows 路径。
-- Hermes 可主动查询任务产物、列出授权目录、读取文本和下载文件，用于检查中间结果、补取遗漏文件和整理交付；各操作仍按用户/profile/机器/项目/任务校验权限。
-- 支持将审批和需要用户回答的问题送回微信，并把回答送到正确请求。
-- 已有资料可回答的问题由 Hermes 查证后回应；原任务内可明确处理的失败由它自动恢复和核验。必须用户决定的审批、目标与权限问题不代批或猜测。
-- 支持断线后的状态核对，避免重复执行已经接收或结果不确定的任务。
-- 将微信用户、Hermes profile、执行机器、项目目录和 Codex 会话明确关联。
-- 本机控制权限仅授予指定用户和 profile，不随公共配置同步给其他用户。
-
-## 第一阶段范围
-
-先打通一个用户、其 Hermes profile、一个 Windows 执行端和一个项目的完整流程。数据与路由从开始就按用户、profile 和执行端区分，再用第二个用户及其另一台执行机器验证隔离。直接复用 Codex app-server 的会话与回合接口，实现最小 Hermes 适配、本机控制服务和必要的任务映射。
-
-多 profile 对应不同用户与执行端属于当前范围；暂不增加公共注册、跨用户共享执行端、通用桌面操作或完整 Dots 替代品。
-
-“远程运行本机 Codex”和“接管 Codex 桌面端已有活跃聊天”是不同能力。前者为首阶段目标；后者需要独立验证，不能因共享配置目录或能读取历史就认为已经实现。
-
-## 当前技术方案
-
-- 服务器：各 profile 的 Python stdio MCP 提供业务工具，外部接入调用本 profile 原生 runs；Go 管理跨机器授权、任务/操作、业务事件、累计预算与交付，不复制 Hermes run 生命周期或 MCP 重连。
-- 每个用户的执行机器：在各自电脑上运行独立的 Go 控制服务、Codex app-server、项目和配置。当前先验证 Windows；其他系统适配不视为已经完成。
-- 两端 Go 服务共用协议定义；Python 通过 Hermes 原生绑定与 `pre_tool_call` 插件逐次登记来源和参数，Go 校验调用引用而非信任模型字段。后台在 POST 前把独立 API session 绑定业务任务，取得 run_id 后再补入；不重复维护身份或运行引擎。安装版钩子和执行路径仍需核对。
-- Go 开发与构建采用官方安装和内置工具链选择，不使用 mise 或额外版本管理器。依赖使用 Go Modules，直接以 `go build`、`go test` 等原生命令构建和检查；执行端用户只需对应平台的控制服务可执行文件及 Codex/项目依赖。具体见实现方案第 3.5 节。
-- 本机控制服务通过 stdio 与 app-server 进行双向 JSON-RPC 通信，不直接开放 app-server 的远程监听端口。
-- 各执行端主动连接 服务器，在受控网络上使用 WebSocket 接收操作、回传事件。当前优先沿用 Tailscale；各端网络接入条件需分别核实。
-- 正式版本中，服务器 使用 SQLite 保存可信用户、profile、执行端和聊天路由绑定；各执行端的本地 SQLite 保存其会话映射、请求结果和待回答请求。最小链路验证可先使用内存，但不承诺重启恢复。断线恢复后先核对状态，不盲目重发结果不确定的操作。
-- SSH 保留作维护入口，任务不再依赖双向 SSH 命令拼接。
-- Hermes 理解要求、诊断异常、核验与交付，后台受理和状态查询使用原生 runs；Codex 原生 Goal 管理已授权的线程内持续推进，避免 Hermes 再建同线程续跑循环。适配仅维护业务事件与 run/动作关联和遗漏补查。
-- 同目录冲突写任务的占用贯穿 active Goal，实际执行静止后才交接。目标或权限变更调用原生 Goal 暂停/更新、回合中断及后续配置，不新建调度、目标或权限引擎。
-- 机器就绪、项目列表、任务快照和简单文件查询由程序直接返回，不为每次查询启动 Codex 模型任务。首版通过微信文本和 Hermes 工具显示任务列表，不另造控制台。
-- 本机服务封装原生 `fs/*` 和受限 `command/exec`，不重写同功能文件后端或命令运行器。我们负责路径授权、跨机器文件传输和私有落地，再交 Hermes 检查、整理和发送；原生文件接口不意味着文件已上传。
-
-本轮已经实现这条直接接入链路。HAPI 仍为备选，不同时维护第二套后端。恢复历史会话与接管桌面已有活跃聊天不同，后者尚未验收。
-
-### 多 profile 与执行端隔离
-
-路由关系为：消息渠道中的可信用户与聊天 → 实际处理消息的 Hermes profile → 已授权执行端 → 该端项目与 Codex 会话。profile 名称、模型生成的参数和消息中自称的身份，都不能代替服务端维护的授权绑定。
-
-- 各执行端分别认证；凭据只允许注册到对应用户和 profile，不能通过自报执行端 ID 覆盖其他用户的连接。
-- 每次查询、创建、继续、追加、停止、审批和文件收发都校验完整归属。会话列表也只从已授权执行端查询，不汇总给其他 profile。
-- 任务、会话、回合、审批、事件、去重记录和通知均带用户/profile/执行端范围，不能只用一个裸会话 ID 或审批编号定位操作。
-- 事件按原任务归属返回原 profile 和微信聊天；某端离线时只报告该端不可用，不自动转给其他用户的执行端。重连也必须恢复原绑定。
-- 执行端凭据、Codex 登录、`CODEX_HOME`、项目路径和本地数据库分别保存。公共工具代码可以复用，授权配置和用户数据不能随公共配置同步。
-
-应用授权已实现并经过隔离账号测试。正式环境仍须用独立 Linux UID 和私有目录部署，不能只靠 profile 名称提供操作系统隔离。
-
-同一 profile 绑定的电脑内可以存在多个 Codex 会话。控制服务按实际 `threadId` 和 `turnId` 调度，聊天当前选择不由后台事件覆盖。第一版计划一台电脑使用一个受控 app-server 管理多个会话；独立进程及原生桌面活跃会话的接入另行验证。
-
-### Codex 控制接口
-
-| 操作 | 官方接口或机制 |
+| Location | Requirements |
 | --- | --- |
-| 查找会话、读取历史 | `thread/list`、`thread/read`、`thread/turns/list`、`thread/items/list` |
-| 创建、恢复会话 | `thread/start`、`thread/resume` |
-| 发送要求并启动回合 | `turn/start` |
-| 执行中追加要求 | `turn/steer` |
-| 停止当前回合 | `turn/interrupt`，随后核对实际终止状态 |
-| 接收进度、回答问题和审批 | 事件通知、服务端请求与对应响应 |
+| Execution computer | Windows, a working authenticated Codex app-server, and task dependencies |
+| Server | Linux, systemd, a working Hermes profile; a separate OS account for each connected profile |
+| Network | Executor can reach the Hub over a controlled network; no server-to-computer SSH access is needed |
+| Deployment tools | An agent with local and server access; PowerShell 7, Python 3.10+ and OpenSSH on Windows for temporary-access preparation |
 
-接口按实际采用的 Codex 版本核对。只能控制所连接实例中的会话；恢复历史与接入其他进程正在运行的会话是不同能力。若要求微信与原生桌面端同时操作同一活跃聊天，必须先验证桌面运行实例的连接方式，不通过另起一个 app-server 模拟接管。
+1. Select a version from [Releases](https://github.com/LiuSphere/dots-lite/releases). Hub and executor must use the same protocol; v0.3.0 uses protocol 3.
+2. Ask your agent to read the repository's [dots-lite-deploy skill](skills/dots-lite-deploy/SKILL.md). Provide the server, target profile, installation directories and allowed folders.
+3. The agent prepares configuration, backups and services, checks versions and permissions, and verifies pairing. Windows defaults to hidden startup at user login. Service restarts reuse credentials and reconnect automatically.
+4. After acceptance checks, the agent revokes temporary deployment access and deletes the dedicated local private key. Routine tasks do not need a server administrator key.
 
-## 开源实现与参考
+A prompt you can give your agent:
 
-2026-10-22 的资料检查结论如下。项目文档和部分源码已查阅，尚未在本机完成安装或端到端验证；开始开发前需重新确认版本和接口。
+```text
+Deploy dots-lite using skills/dots-lite-deploy/SKILL.md.
+Inspect the existing setup, then ask for any missing server, profile,
+installation-directory and authorized-folder choices.
+If temporary passwordless sudo is needed, explain the risks and obtain
+my acknowledgement before preparing access. Prepare everything for me;
+give me only the command that requires my password.
+After acceptance checks, revoke temporary access, delete the dedicated
+local deployment private key, and report what was and was not verified.
+```
 
-| 实现 | 可复用部分 | 限制与定位 |
-| --- | --- | --- |
-| [OpenAI Codex app-server](https://learn.chatgpt.com/docs/app-server) | 对话生命周期、运行事件、中途引导、停止、审批 | 当前主线。通过本机 stdio 接入，自行承担远程连接、运行管理和恢复。 |
-| [tiann/hapi](https://github.com/tiann/hapi) | Hub、Runner、共享会话与远程客户端 | 备选。共享终端会话不等于接管原生桌面聊天；其文档注明原生 Windows 执行仍需验证。 |
-| [uluckyXH/Chat-Codex](https://github.com/uluckyXH/Chat-Codex) | app-server 适配、聊天与会话绑定、审批和文件回传 | 实现参考，尚未安装或验证。不因参考它而替换现有 Hermes 微信入口。 |
-| [Dimillian/CodexMonitor](https://github.com/Dimillian/CodexMonitor) | 远端后台、多项目、会话和审批处理 | 完整桌面客户端，可参考其实现，不作为首阶段另造界面的理由。 |
-| [lucianlamp/codex-monitor](https://github.com/lucianlamp/codex-monitor) | 外部事件投递、app-server 连接、Windows 接收方式 | 与上一项目不同。其文档对 Windows 原生 App 采用 hook 等方式，不能视为通用桌面接管已经可用。 |
-| [slopus/happy](https://github.com/slopus/happy) | 手机与终端继续工作、同步服务 | 备选。需要区分原版 CLI 与新的 Happy Harness。 |
+**A temporary deployment key grants root-equivalent server access.** Anyone holding it can control the server during deployment. The skill includes [risk disclosure, one-command provisioning and revocation](skills/dots-lite-deploy/references/access.md). Generate the private key locally and install only its public key on the server. With an existing noninteractive ordinary SSH login, the user normally enters only the sudo password. Otherwise SSH may require an additional password or multi-factor authentication.
 
-重点接口资料：
+## Status and limits
 
-- [Codex app-server API](https://learn.chatgpt.com/docs/app-server#api-overview)
-- [Dots 的本地任务与持续跟进能力](https://learn.chatgpt.com/docs/dots/tasks-and-memory)
-- [Chat-Codex 实现说明](https://github.com/uluckyXH/Chat-Codex)
-- [HAPI 架构](https://github.com/tiann/hapi/blob/main/docs/guide/how-it-works.md)
-- [Codex 共享会话及生命周期](https://github.com/tiann/hapi/blob/main/docs/guide/codex-shared-sessions.md)
-- [HAPI REST 接口](https://github.com/tiann/hapi/blob/main/docs/api/client-contract/rest.md)
-- [HAPI SSE 与断线恢复](https://github.com/tiann/hapi/blob/main/docs/api/client-contract/sse.md)
+This is an early-stage project. The Hub, executor, MCP adapter, source binding, background follow-up and file transfers are implemented. Acceptance records include real Codex execution and cross-machine file retrieval. The current naming update has also passed deployment checks. See the [acceptance record](docs/验收记录.md) for evidence and limits.
 
-## 需要自己实现的部分
+Two real users on different computers, human WeChat approval, actual WeChat attachment exchange, sustained fault recovery and startup after a system reboot still need field validation. Reading or restoring Codex history does not establish control over an already active desktop chat.
 
-1. Hermes 工具：查询机器与项目、列出稳定任务、创建、继续、补充和停止任务；分别展示执行、等待、验证和交付状态，不能把回合结束等同于目标已完成。
-2. 持久化映射：服务器 保存用户/profile/执行端和聊天路由授权，各执行端保存本地任务与会话记录；恢复后在原归属范围内按实际结果更新标识。
-3. 事件与跟进：持久记录关键事件、Hermes 投递/处理句柄与决定、后续动作及核验结果。常驻补查发现遗漏或未完成处理；投递不等于处理完成。可自行解决的失败先自动恢复，需要用户决定、持续阻塞或最终结果再通知；不能假定 app-server 提供 HAPI 的 SSE 游标回放。
-4. 问题与审批：可查证的问题由 Hermes 自行回答；必须用户决定的请求绑定用户、profile、执行端、会话和有效请求再转交。模型不能冒充用户批准或将模糊同意扩成全局授权。
-5. 执行端运行管理：保证远程任务不依赖手动打开的终端；区分网络断开、进程退出和任务失败。
-6. 附件与结果：将微信附件送入正确工作区；按交付清单自动回传产物；提供授权目录查询、文本读取与文件下载工具，使 Hermes 可主动检查和补取文件，再通过微信交付。
+The MCP configuration key is `dots_lite`; all seven tools use the `dots_lite_*` prefix. Configuration uses `folders`, `folder_ids` and `folder_id`. The current version rejects old names. Existing deployments require coordinated shutdown, backup and offline state conversion before upgrading; see the [operations guide](docs/运行指南.md).
 
-优先使用 app-server 已有能力；控制服务补跨机器连接、身份与会话映射、持久记录、通知和任务文件获取，不重复实现 Codex 的执行引擎。首版不以取文件为由增加任意文件写入或通用 Shell 接口。
+## Development
 
-## 第一阶段验收
+The Go version is declared in [go.mod](go.mod), currently Go 1.27.3. The Hermes adapter uses Python 3.14 and a uv lockfile. Running a released Windows executor does not require Go or the adapter's Python environment.
 
-- 从微信提交任务，本机在指定项目内产生可检查的实际结果。
-- 后续消息进入同一会话，并能正确使用前文。
-- Hermes 换 session 后能从任务列表找到原工作，正确继续对应 Codex 会话；机器在线但 Codex 未就绪时如实报告。
-- 执行中追加要求和停止均实际生效；停止后仍可继续对话。
-- 触发一次真实审批，并分别验证用户批准与拒绝的实际效果。
-- 断开连接后恢复，状态可以核对，任务不被盲目重发，最终结果不因重复通知而混乱。
-- 用两个用户、两个 profile 和两台不同机器上的 Codex 执行端分别验证正确路由；用户 A 无法查询、继续、停止或审批用户 B 的任务，也无法获取其文件、事件和通知。
-- 验证伪造目标标识、重复请求和重连不能越过绑定；一个执行端离线时，不会改派到另一用户的执行端。
-- 需要交付的文件可从微信取得，而非仅得到本机路径。
-- Hermes 实际取得自动回传的产物，并可主动查询、读取及下载遗漏文件；其他用户文件和授权范围外路径访问被拒绝。
-- 分别记录 Codex 执行结果、Hermes 文件获取结果和微信交付结果；文件传输失败时只重试对应传输，不重新执行原任务。
-- 回合正常结束但检查失败或证据不足时，回报实际失败或待核验，不报告目标已完成。完整场景与对应编号见需求文档，原型演示不等于首版通过。
-- 已知可恢复异常无需用户逐次介入：Hermes 完成诊断、恢复和真实核验；不明确或必须人工处理的情况才带事实与具体问题升级。
-- 验证事件未投递、Hermes 未处理/中途退出、动作已发生但确认丢失时仍能补查恢复，无重复副作用。重复无进展、预算耗尽或用户暂停/取消后不自动继续。
+```sh
+# From the repository root. Normal tests do not call a real model.
+go mod download
+go test ./...
+go vet ./...
+uv sync --project adapters/hermes --locked
+uv run --project adapters/hermes --locked python -m unittest discover -s adapters/hermes/tests -v
+```
 
-桌面已有会话接管单独记录验证结论，不作为上述能力已完成的推论。
+Run the complete UID/socket suite on Linux. Windows skips those platform-specific cases. Real Codex integration tests require explicit `DOTS_LITE_REAL_CODEX=1`; they call a model and write to a temporary workspace. Build and service instructions are in the [deployment guide](docs/运行指南.md). Binaries are distributed through Releases rather than committed to the repository.
 
-## 下一步与待决事项
+```text
+cmd/hub/           Linux Hub entry point
+cmd/executor/      Executor entry point
+internal/          Protocol, authorization, sessions, files and SQLite state
+adapters/hermes/   MCP, trusted-source plugin and background worker
+skills/            Reusable deployment workflow and helpers
+docs/              Usage, operations, design and acceptance records
+```
 
-1. 按运行指南登记实际消息来源、用户身份、项目和执行端，不从 profile 目录名称推断授权。
-2. 在两名真实用户的两台执行电脑上验证路由、会话、项目、恢复和交叉拒绝；目前一台 Windows 实机的结果不能替代此项。
-3. 通过实际微信消息验证输入附件、真人批准和拒绝、原聊天通知及输出附件，并逐项核对真实回执。
-4. 桌面已有活跃会话接管单独验证；当前独立 app-server 会话控制不证明该能力。
+## Contributing
 
-Python 薄适配、Go Hub 与执行端、本机 stdio、跨机器 WebSocket 和 SQLite 均已有实现。真实 Codex、服务器 跨机器取文件与 Hermes 核验已有运行证据；原聊天发送复用官方函数，实际微信收发和第二台用户电脑仍需现场验收。配置与常驻方法见[运行指南](docs/运行指南.md)，各项证据及边界见[验收记录](docs/验收记录.md)。
+Use Issues for bugs and proposals, and Pull Requests for changes. Include the version, OS, reproduction steps and redacted logs. Distinguish model execution, file acquisition and message delivery. Keep private keys, tokens, real chat identifiers and personal deployment records out of reports and commits.
+
+Run relevant tests for code changes. Validate Linux permission and socket behavior on Linux. The [requirements](docs/需求.md) and [design](docs/详细实现方案.md) explain the architecture; detailed guides are currently in Chinese.
+
+## License
+
+Licensed under [BSD 3-Clause](LICENSE). Commercial use, modification and redistribution are permitted. Retain the copyright notice, license conditions and disclaimer when redistributing. Do not use the copyright holder's or contributors' names to endorse derived products without permission. Third-party components retain their own licenses.
