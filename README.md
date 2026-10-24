@@ -8,7 +8,7 @@
 
 复用边界：不修改 Hermes 源码、内部数据库结构或 Agent 循环。MCP 客户端、人工确认、后台 runs 与微信收发复用 Hermes；会话历史、审批等待、线程内 Goal、文件与命令接口复用 Codex app-server。我们只补跨机器授权与传输、业务任务/操作记录、暂停意图、累计恢复预算、核验和交付。具体能力与未验证范围见实现方案第 13、16 节。
 
-使用入口：[微信用户使用指南](docs/使用指南.md)、[管理员部署与运行指南](docs/运行指南.md)、[部署 skill](.agents/skills/lite-dots-deploy/SKILL.md)。
+使用入口：[微信用户使用指南](docs/使用指南.md)、[管理员部署与运行指南](docs/运行指南.md)、[部署 skill](skills/lite-dots-deploy/SKILL.md)。
 
 部署 skill 会收集服务器免交互 SSH 密钥路径、免密 sudo、目标 profile、双端部署目录及授权文件夹。仓库中的账号、地址和目录示例均为占位值；真实部署记录、私钥、token 和聊天标识保存在仓库外或被忽略的私有目录。通用记录格式见[部署记录模板](docs/部署记录模板.md)。
 
