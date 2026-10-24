@@ -155,6 +155,10 @@ func (s *Service) uploadFileOperation(ctx context.Context, op protocol.Operation
 	if task.Version != op.TaskVersion || task.Paused {
 		return failResult(r, "stale_version", "attachment task was paused or changed version")
 	}
+	root, cwd, err := s.taskRootLocked(ctx, task)
+	if err != nil {
+		return failResult(r, "working_directory_unavailable", err.Error())
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT project_root FROM executor_tasks WHERE occupied=1 AND task_id<>?`, task.ID)
 	if err != nil {
 		return failResult(r, "storage", err.Error())
@@ -165,7 +169,7 @@ func (s *Service) uploadFileOperation(ctx context.Context, op protocol.Operation
 			rows.Close()
 			return failResult(r, "storage", err.Error())
 		}
-		if rootsOverlap(root, project.Root) {
+		if rootsOverlap(root, cwd) {
 			rows.Close()
 			return failResult(r, "conflict", "attachment project is occupied by another task")
 		}
@@ -178,7 +182,6 @@ func (s *Service) uploadFileOperation(ctx context.Context, op protocol.Operation
 	if err := ctx.Err(); err != nil {
 		return failResult(r, "canceled", err.Error())
 	}
-	root := s.roots[op.ProjectID]
 	dir := filepath.Join(".dots-duet", "attachments", task.ID)
 	if err := root.MkdirAll(dir, 0700); err != nil {
 		return failResult(r, "path_denied", err.Error())
@@ -230,9 +233,24 @@ func (s *Service) readFileOperation(ctx context.Context, op protocol.Operation) 
 	s.mu.Lock()
 	p, exists := s.projectLocked(op.ProjectID)
 	root := s.roots[op.ProjectID]
+	var taskErr error
+	if exists && p.Available && op.TaskID != "" {
+		var task protocol.Task
+		task, taskErr = s.loadTask(ctx, op.TaskID)
+		if taskErr == nil && task.ProjectID != op.ProjectID {
+			s.mu.Unlock()
+			return failResult(protocol.Result{OperationID: op.ID, TaskID: op.TaskID, Stage: "failed"}, "forbidden", "file project differs from task project")
+		}
+		if taskErr == nil {
+			root, _, taskErr = s.taskRootLocked(ctx, task)
+		}
+	}
 	s.mu.Unlock()
 	if !exists || !p.Available {
 		return failResult(protocol.Result{OperationID: op.ID, TaskID: op.TaskID, Stage: "failed"}, "project_unavailable", "registered project directory is unavailable")
+	}
+	if taskErr != nil {
+		return failResult(protocol.Result{OperationID: op.ID, TaskID: op.TaskID, Stage: "failed"}, "working_directory_unavailable", taskErr.Error())
 	}
 	return s.readFileAtRoot(ctx, op, root)
 }

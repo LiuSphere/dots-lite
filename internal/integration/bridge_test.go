@@ -23,14 +23,18 @@ import (
 )
 
 func TestBridgeRunsRegisteredTaskWithoutRepeatingExecution(t *testing.T) {
-	runRegisteredBridge(t, false)
+	runRegisteredBridge(t, false, "")
 }
 
 func TestBridgeStagesPrivateInputsBeforeNativeTurnAndOmitsPublicBytes(t *testing.T) {
-	runRegisteredBridge(t, true)
+	runRegisteredBridge(t, true, "")
 }
 
-func runRegisteredBridge(t *testing.T, withInputs bool) {
+func TestBridgeRunsInChosenSubfolderAndKeepsInputsAndFilesThere(t *testing.T) {
+	runRegisteredBridge(t, true, "team-a/demo")
+}
+
+func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	t.Cleanup(cancel)
@@ -55,14 +59,21 @@ func runRegisteredBridge(t *testing.T, withInputs bool) {
 	}
 	server := httptest.NewServer(h.WebsocketHandler())
 	t.Cleanup(server.Close)
-	projectRoot := t.TempDir()
+	authorizedRoot := t.TempDir()
+	projectRoot := authorizedRoot
+	if workingDirectory != "" {
+		projectRoot = filepath.Join(authorizedRoot, filepath.FromSlash(workingDirectory))
+		if err := os.MkdirAll(projectRoot, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
 	nativeMode := "bridge"
 	if withInputs {
 		nativeMode = "bridge-inputs"
 	}
 	service, err := executor.NewService(executor.ServiceConfig{
 		Scope: scope, StatePath: filepath.Join(state, "executor.sqlite"),
-		Projects: []protocol.Project{{ID: "project", Root: projectRoot, ApprovalPolicy: "on-request", Sandbox: "workspace-write"}},
+		Projects: []protocol.Project{{ID: "project", Root: authorizedRoot, ApprovalPolicy: "on-request", Sandbox: "workspace-write"}},
 		Native: executor.Options{
 			Command: []string{os.Args[0], "-test.run=^TestNativeProcess$", "--", nativeMode},
 			Stderr:  io.Discard,
@@ -144,6 +155,27 @@ func runRegisteredBridge(t *testing.T, withInputs bool) {
 		return result
 	}
 	prepareArgs := map[string]any{"action": "task.create", "project_id": "project", "input": "Create the fixture proof file", "name": "fixture task"}
+	if workingDirectory != "" {
+		folders := callTool("duet_query", map[string]string{"query": "folders"})
+		var listed []protocol.Project
+		if err := json.Unmarshal(folders, &listed); err != nil || len(listed) != 1 || listed[0].Root != authorizedRoot {
+			t.Fatalf("authorized folders: %s, %v", folders, err)
+		}
+		directory := callTool("duet_query", map[string]string{"query": "directory", "folder_id": "project", "path": "team-a"})
+		var listing struct {
+			Entries []struct {
+				Name        string `json:"name"`
+				IsDirectory bool   `json:"is_directory"`
+			} `json:"entries"`
+		}
+		if err := json.Unmarshal(directory, &listing); err != nil || len(listing.Entries) != 1 || listing.Entries[0].Name != "demo" || !listing.Entries[0].IsDirectory {
+			t.Fatalf("browse before a task: %s, %v", directory, err)
+		}
+		delete(prepareArgs, "project_id")
+		prepareArgs["folder_id"] = "project"
+		prepareArgs["working_directory"] = workingDirectory
+		prepareArgs["artifacts"] = []string{"proof.txt"}
+	}
 	var attachments []protocol.InvocationAttachment
 	if withInputs {
 		prepareArgs["inputs"] = []map[string]string{{"name": "input.bin", "local_path": "/fixture-admission/input"}, {"name": "empty.txt", "local_path": "/fixture-admission/empty"}}
@@ -241,6 +273,9 @@ func runRegisteredBridge(t *testing.T, withInputs bool) {
 			t.Fatal(err)
 		}
 		if task.Execution == "completed" {
+			if workingDirectory != "" && task.WorkingDirectory != workingDirectory {
+				t.Fatalf("task lost its selected directory: %s", result)
+			}
 			if task.Verification != "pending" || task.Delivery != "pending" {
 				t.Fatalf("turn completion was confused with verification/delivery: %s", result)
 			}
@@ -258,6 +293,21 @@ func runRegisteredBridge(t *testing.T, withInputs bool) {
 	}
 	if len(snapshot.Tasks) != 1 || snapshot.Tasks[0].Execution != "completed" {
 		t.Fatalf("executor snapshot overwrote fast completion: %+v", snapshot.Tasks)
+	}
+	if workingDirectory != "" {
+		text := callTool("duet_query", map[string]string{"query": "text", "task_id": registration.TaskID, "path": "proof.txt"})
+		var file struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(text, &file); err != nil || file.Text != "executed\n" {
+			t.Fatalf("task-relative file query: %s, %v", text, err)
+		}
+		if _, err := os.Stat(filepath.Join(authorizedRoot, "proof.txt")); !os.IsNotExist(err) {
+			t.Fatalf("task wrote outside its chosen working directory: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(authorizedRoot, ".dots-duet")); !os.IsNotExist(err) {
+			t.Fatalf("inputs were staged at authorization root: %v", err)
+		}
 	}
 }
 

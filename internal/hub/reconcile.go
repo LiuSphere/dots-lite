@@ -79,7 +79,7 @@ func (h *Hub) readTaskState(ctx context.Context, b Binding, task taskRecord, act
 	if err != nil {
 		return nil, err
 	}
-	result, err := h.dispatch(ctx, b, protocol.Operation{ID: id, TaskID: task.ID, Scope: b.scope(), TaskVersion: task.Version, ProjectID: task.ProjectID, ThreadID: task.ThreadID, Action: action})
+	result, err := h.dispatch(ctx, b, protocol.Operation{ID: id, TaskID: task.ID, Scope: b.scope(), TaskVersion: task.Version, ProjectID: task.ProjectID, WorkingDirectory: task.WorkingDirectory, ThreadID: task.ThreadID, Action: action})
 	if err != nil {
 		return nil, err
 	}

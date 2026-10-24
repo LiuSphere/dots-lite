@@ -17,3 +17,7 @@ __pycache__/
 *.sqlite-shm
 *.sqlite-wal
 *.log
+
+# Private deployment records and machine-local skill junctions.
+/deployments.local/
+/.claude/skills/

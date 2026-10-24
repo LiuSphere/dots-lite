@@ -53,11 +53,11 @@ func (h *Hub) machine(b Binding) map[string]any {
 	s := h.sessions[b.ExecutorID]
 	h.mu.Unlock()
 	if s == nil {
-		return map[string]any{"connected": false, "snapshot": protocol.Snapshot{Initialized: false, Projects: []protocol.Project{}, Tasks: []protocol.Task{}}}
+		return map[string]any{"connected": false, "snapshot": publicSnapshot(protocol.Snapshot{Initialized: false, Projects: []protocol.Project{}, Tasks: []protocol.Task{}}, b)}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return map[string]any{"connected": true, "snapshot": s.snapshot}
+	return map[string]any{"connected": true, "snapshot": publicSnapshot(s.snapshot, b)}
 }
 func (h *Hub) WebsocketHandler() http.Handler { return http.HandlerFunc(h.executorHTTP) }
 func (h *Hub) executorHTTP(w http.ResponseWriter, r *http.Request) {

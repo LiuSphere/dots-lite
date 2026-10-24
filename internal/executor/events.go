@@ -320,11 +320,13 @@ func (s *Service) reconcileCompletion(ctx context.Context, expected protocol.Tas
 		// Keep the task lock through authorized file reads and commit. A new
 		// operation cannot claim the root before these artifact bytes are captured.
 		events := make([]protocol.Event, 0, len(task.Artifacts)+1)
-		project, exists := s.projectLocked(task.ProjectID)
+		taskRoot, _, rootErr := s.taskRootLocked(ctx, task)
 		for _, path := range task.Artifacts {
-			result := failResult(protocol.Result{Stage: "failed"}, "project_unavailable", "registered project directory is unavailable")
-			if exists && project.Available {
-				result = s.readFileAtRoot(ctx, protocol.Operation{TaskID: task.ID, ProjectID: task.ProjectID, Action: "files.download", Path: path}, s.roots[task.ProjectID])
+			result := protocol.Result{Stage: "failed"}
+			if rootErr != nil {
+				result = failResult(result, "working_directory_unavailable", rootErr.Error())
+			} else {
+				result = s.readFileAtRoot(ctx, protocol.Operation{TaskID: task.ID, ProjectID: task.ProjectID, Action: "files.download", Path: path}, taskRoot)
 			}
 			event := protocol.Event{TaskID: task.ID, InstanceID: s.instance, ThreadID: task.ThreadID, TurnID: task.TurnID, CreatedAt: time.Now().UTC()}
 			if result.Stage == "accepted" {

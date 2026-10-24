@@ -38,7 +38,7 @@ func TestAPIQueriesRequireTheirPreRegisteredTask(t *testing.T) {
 	var first, second struct {
 		TaskID string `json:"task_id"`
 	}
-	if err := json.Unmarshal(call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","input":"first"}`), &first); err != nil {
+	if err := json.Unmarshal(call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","working_directory":"first","input":"first"}`), &first); err != nil {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal(call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","input":"second"}`), &second); err != nil {
@@ -83,11 +83,24 @@ func TestAPIQueriesRequireTheirPreRegisteredTask(t *testing.T) {
 	}
 	for _, args := range []string{
 		`{"query":"tasks"}`, `{"query":"operations"}`, `{"query":"followups"}`, `{"query":"machine"}`,
+		`{"query":"folders"}`, `{"query":"directory","folder_id":"demo","path":"."}`,
 		`{"query":"download","task_id":"` + second.TaskID + `","path":"private.txt"}`,
 		`{"query":"followups","task_id":"` + second.TaskID + `"}`,
 	} {
 		if _, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "duet_query", Arguments: json.RawMessage(args), Source: source}); err == nil {
 			t.Fatalf("prebound API session escaped its task: %s", args)
+		}
+	}
+	for _, args := range []string{
+		`{"action":"task.continue","task_id":"` + first.TaskID + `","folder_id":"demo","working_directory":"other","input":"continue"}`,
+		`{"action":"task.continue","task_id":"` + first.TaskID + `","folder_id":"other","input":"continue"}`,
+	} {
+		ref, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "duet_prepare", Arguments: json.RawMessage(args), Source: source})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.Call(ctx, 1001, protocol.ToolRequest{Tool: "duet_prepare", Arguments: json.RawMessage(args), ContextRef: ref}); err == nil {
+			t.Fatalf("API followup changed its folder or directory: %s", args)
 		}
 	}
 	for _, query := range []string{"task", "operations", "followups"} {

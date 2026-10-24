@@ -20,6 +20,29 @@ from mcp.client.stdio import stdio_client
 
 class MCPTests(unittest.IsolatedAsyncioTestCase):
     @unittest.skipUnless(hasattr(socket, "AF_UNIX"), "UID socket integration runs on Linux")
+    async def test_folder_tools_preserve_chosen_directory_over_real_stdio(self):
+        with hub_peer(responder=lambda path, body: {"accepted": True}) as (socket_path, requests):
+            params = StdioServerParameters(
+                command=sys.executable, args=["-m", "dots_duet_lite_hermes"],
+                env={**os.environ, "DOTS_DUET_SOCKET": socket_path},
+            )
+            async with asyncio.timeout(10):
+                async with stdio_client(params) as streams:
+                    async with ClientSession(*streams) as session:
+                        await session.initialize()
+                        for tool, arguments in (
+                            ("duet_query", {"query": "folders"}),
+                            ("duet_query", {"query": "directory", "folder_id": "authorized", "path": "."}),
+                            ("duet_prepare", {"action": "task.create", "folder_id": "authorized", "working_directory": "nested/child", "input": "work"}),
+                            ("duet_prepare", {"action": "task.continue", "task_id": "Q1", "working_directory": "nested/child", "input": "continue"}),
+                        ):
+                            result = await session.call_tool(tool, {**arguments, "_context_ref": "trusted-folder-registration"})
+                            self.assertFalse(result.is_error, result)
+                            self.assertEqual(requests[-1], ("/v1/tools/call", {
+                                "tool": tool, "arguments": arguments, "context_ref": "trusted-folder-registration",
+                            }))
+
+    @unittest.skipUnless(hasattr(socket, "AF_UNIX"), "UID socket integration runs on Linux")
     async def test_attachment_tools_forward_references_and_reject_model_supplied_bytes(self):
         with hub_peer(responder=lambda path, body: {"operation_id": "attachment-operation"}) as (socket_path, requests):
             params = StdioServerParameters(

@@ -9,6 +9,7 @@ type publicFile struct {
 }
 type publicOperationView struct {
 	operationRecord
+	FolderID   string       `json:"folder_id"`
 	Upload     *publicFile  `json:"upload,omitempty"`
 	InputFiles []publicFile `json:"input_files,omitempty"`
 }
@@ -16,7 +17,7 @@ type publicOperationView struct {
 // Only model-facing responses use this view. Stored operations and transport
 // messages retain their immutable input bytes.
 func publicOperation(op operationRecord) publicOperationView {
-	view := publicOperationView{operationRecord: op}
+	view := publicOperationView{operationRecord: op, FolderID: op.ProjectID}
 	metadata := func(file protocol.FileUpload) publicFile {
 		return publicFile{Name: file.Name, SHA256: file.SHA256, Size: file.Size}
 	}

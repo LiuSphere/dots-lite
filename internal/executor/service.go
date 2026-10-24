@@ -32,6 +32,7 @@ type Service struct {
 	client           *Client
 	instance         string
 	roots            map[string]*os.Root
+	taskRoots        map[string]*os.Root
 	projects         map[string]protocol.Project
 	cancel           context.CancelFunc
 	pumpDone         chan struct{}
@@ -56,7 +57,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Service{config: config, db: db, instance: randomID(), roots: map[string]*os.Root{}, projects: map[string]protocol.Project{}, reconciling: map[string]bool{}, reconcilePending: map[string]protocol.Task{}}
+	s := &Service{config: config, db: db, instance: randomID(), roots: map[string]*os.Root{}, taskRoots: map[string]*os.Root{}, projects: map[string]protocol.Project{}, reconciling: map[string]bool{}, reconcilePending: map[string]protocol.Task{}}
 	for _, statement := range []string{
 		`PRAGMA journal_mode=WAL`, `PRAGMA busy_timeout=5000`,
 		`CREATE TABLE IF NOT EXISTS executor_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -299,6 +300,28 @@ func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.R
 	if !p.Available && op.Action != "task.stop" && op.Action != "task.read" && op.Action != "task.history" && op.Action != "goal.get" {
 		return failResult(r, "project_unavailable", "registered project directory is unavailable or no longer matches its authorized open handle")
 	}
+	if op.TaskID != "" && op.Action != "task.create" {
+		s.mu.Lock()
+		task, taskErr := s.loadTask(ctx, op.TaskID)
+		s.mu.Unlock()
+		if taskErr != nil {
+			return failResult(r, "task_not_found", taskErr.Error())
+		}
+		if task.ProjectID != op.ProjectID {
+			return failResult(r, "forbidden", "task belongs to a different authorized folder")
+		}
+		if err := matchingWorkingDirectory(op, task); err != nil {
+			return failResult(r, "invalid_working_directory", err.Error())
+		}
+		if isWriteAction(op.Action) && op.Action != "task.stop" {
+			s.mu.Lock()
+			_, _, taskErr = s.taskRootLocked(ctx, task)
+			s.mu.Unlock()
+			if taskErr != nil {
+				return failResult(r, "working_directory_unavailable", taskErr.Error())
+			}
+		}
+	}
 	if op.Action == "files.list" || op.Action == "files.read" || op.Action == "files.download" {
 		return s.readFileOperation(ctx, op)
 	}
@@ -330,19 +353,39 @@ func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.R
 		r.Error = err
 		return r
 	}
+	directory, directoryErr := workingDirectory(op.WorkingDirectory)
+	if directoryErr != nil {
+		return failResult(r, "invalid_working_directory", directoryErr.Error())
+	}
+	s.mu.Lock()
+	taskRoot, cwd, directoryErr := s.openTaskRootLocked(op.ProjectID, directory)
+	s.mu.Unlock()
+	if directoryErr != nil {
+		return failResult(r, "working_directory_unavailable", directoryErr.Error())
+	}
+	defer func() {
+		if taskRoot != nil {
+			_ = taskRoot.Close()
+		}
+	}()
 	now := time.Now().UTC()
-	task := protocol.Task{ID: op.TaskID, Scope: op.Scope, Name: op.Name, Objective: op.Input, ProjectID: op.ProjectID, Version: op.TaskVersion, Execution: "starting", Verification: "pending", Delivery: "pending", Artifacts: op.Artifacts, CreatedAt: now, UpdatedAt: now}
+	task := protocol.Task{ID: op.TaskID, Scope: op.Scope, Name: op.Name, Objective: op.Input, ProjectID: op.ProjectID, WorkingDirectory: directory, Version: op.TaskVersion, Execution: "starting", Verification: "pending", Delivery: "pending", Artifacts: op.Artifacts, CreatedAt: now, UpdatedAt: now}
 	if task.Version == 0 {
 		task.Version = 1
 	}
-	if err := s.insertTask(ctx, task, p.Root); err != nil {
+	if err := s.insertTask(ctx, task, cwd); err != nil {
 		return failResult(r, "conflict", err.Error())
 	}
+	s.mu.Lock()
+	if s.taskRoots[task.ID] == nil {
+		s.taskRoots[task.ID], taskRoot = taskRoot, nil
+	}
+	s.mu.Unlock()
 	input, inputFailure := s.stageInputFiles(ctx, op, task)
 	if inputFailure != nil {
 		return *inputFailure
 	}
-	params := map[string]any{"cwd": p.Root, "approvalPolicy": p.ApprovalPolicy, "sandbox": p.Sandbox, "approvalsReviewer": "user"}
+	params := map[string]any{"cwd": cwd, "approvalPolicy": p.ApprovalPolicy, "sandbox": p.Sandbox, "approvalsReviewer": "user"}
 	if p.Model != "" {
 		params["model"] = p.Model
 	}
@@ -575,6 +618,9 @@ func (s *Service) Close() error {
 	}
 	s.background.Wait()
 	for _, root := range s.roots {
+		err = errors.Join(err, root.Close())
+	}
+	for _, root := range s.taskRoots {
 		err = errors.Join(err, root.Close())
 	}
 	if s.db != nil {

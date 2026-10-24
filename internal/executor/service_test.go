@@ -1626,6 +1626,9 @@ func TestServicePeer(t *testing.T) {
 	turns := 0
 	interrupted := false
 	goalStatus, forcedStatus := "", ""
+	if len(os.Args) == 4 && os.Args[2] == "expect-resume-cwd" {
+		interrupted = true
+	}
 	projectRoot := ""
 	var control net.Conn
 	var pendingTurnID json.RawMessage
@@ -1701,12 +1704,20 @@ func TestServicePeer(t *testing.T) {
 		case "initialize":
 			result = map[string]string{"userAgent": "service-peer/1"}
 		case "thread/start":
+			if len(os.Args) == 4 && os.Args[2] == "expect-resume-cwd" {
+				_ = enc.Encode(map[string]any{"id": frame.ID, "error": map[string]any{"code": -32602, "message": "continuation must resume the existing thread"}})
+				continue
+			}
 			var params struct {
 				Model string `json:"model"`
 				Cwd   string `json:"cwd"`
 			}
 			_ = json.Unmarshal(frame.Params, &params)
 			projectRoot = params.Cwd
+			if len(os.Args) == 4 && os.Args[2] == "expect-cwd" && filepath.Clean(params.Cwd) != filepath.Clean(os.Args[3]) {
+				_ = enc.Encode(map[string]any{"id": frame.ID, "error": map[string]any{"code": -32602, "message": "native cwd did not match the selected task directory"}})
+				continue
+			}
 			if len(os.Args) == 3 && os.Args[2] == "expect-inputs" {
 				empty, emptyErr := os.ReadFile(filepath.Join(projectRoot, ".dots-duet", "attachments", "input-task", "empty.bin"))
 				binary, binaryErr := os.ReadFile(filepath.Join(projectRoot, ".dots-duet", "attachments", "input-task", "binary.bin"))
@@ -1782,6 +1793,15 @@ func TestServicePeer(t *testing.T) {
 			}
 			result = map[string]any{"turn": map[string]string{"id": fmt.Sprintf("turn-%d", turns), "status": "inProgress"}}
 		case "thread/resume":
+			if len(os.Args) == 4 && (os.Args[2] == "expect-cwd" || os.Args[2] == "expect-resume-cwd") {
+				var params struct {
+					Cwd string `json:"cwd"`
+				}
+				if json.Unmarshal(frame.Params, &params) != nil || filepath.Clean(params.Cwd) != filepath.Clean(os.Args[3]) {
+					_ = enc.Encode(map[string]any{"id": frame.ID, "error": map[string]any{"code": -32602, "message": "native resume cwd did not match the original task directory"}})
+					continue
+				}
+			}
 			forcedStatus, interrupted = "", true
 			result = map[string]any{"thread": map[string]string{"id": "thread-1"}}
 		case "turn/steer":

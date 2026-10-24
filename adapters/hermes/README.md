@@ -63,36 +63,18 @@ worker 使用 Hub 已保存的完整 request、session 和 idempotency key。响
 
 原生回执原样保留。成功须有 `success=true` 和非空 message ID，且无 partial、dropped 或 warnings。已核对的官方 Weixin 单文件契约另生成绑定 artifact ID、哈希、大小与目标的 verification，不伪造原生 `media_delivered`。原生若明确否认媒体送达，或其他平台的回执不足以证明媒体送达，则保持 unknown。超时、异常和不完整回执不重发；只有发送前明确失败才报告 definitely_not_sent，让 Hub 在预算内重试。
 
-## hub-server 实测范围
+## 测试范围
 
-本轮最终已将生产 Hermes 更新为 stable v0.22.5 / `bf0203a794a07aac3ff764972ab9087baa4e4f4e`，运行于独立 `/opt/hermes-agent-v0.22.5`。四个非 default profile 使用独立 UID，default 保留原账号。下文按版本保留历史实测；当前部署和边界见[验收记录](../../docs/验收记录.md)。
+普通单元测试不调用模型。Linux 执行 Unix UID、socket 和权限检查；Windows 明确跳过不支持的接口，不能用跳过结果代替 Linux 验收。测试环境使用独立账号或临时 HOME，来源与外部发送器使用明确 fixture，不能注册为生产绑定。
 
-以下目录是本轮测试的历史证据位置。临时测试运行时、账户、socket 与副本已在本轮收尾清理，不作为永久可访问接口。最终留存证据由项目验收记录说明。
+以下 smoke 脚本需显式提供独立测试环境：
 
-测试开始时，安装版 Hermes 为 `f97608f178d1ffeca59860195ab7da295f7c8e5f`，其 Python 为 3.13.16。该版缺少 `bound_session_key()`，本插件拒绝放行。此前未修改其核心或现有网关配置；这条历史结果不描述后续正式升级状态。
+- `tests/hub_mcp_smoke.py`：真实 Go Hub、MCP stdio、可信引用、参数及来源拒绝。
+- `tests/native_ingress_smoke.py`：官方插件三 hook、原生媒体上下文和私有字节传输；不调用模型。
+- `tests/native_delivery_smoke.py`：官方发送函数配合外部网络 fixture，不证明真实微信送达。
+- `tests/native_api_smoke.py`、`tests/native_hub_smoke.py`：真实原生 API/模型与工具核验，需要明确模型使用授权。
+- `tests/hub_native_delivery_smoke.py`：输入附件、真实 Codex 执行、worker 获取和官方发送 helper 的组合流程；渠道 fixture 与真实微信分别记录。
 
-独立测试目录固定了官方源码 `5894e750c3dba980d43b25aa29e3958149ba2c61`。官方 PluginManager 已验证插件加载、原生消息绑定注册、无绑定拒绝及陈旧环境不复用。该契约测试使用外部 socket 接收端，并非真实 Go Hub。
+嵌入 `APIServerAdapter` 的测试入口需在同一进程完成官方 MCP discovery，另一进程的发现不会填充当前注册表。直接展示工具与 Tool Search 需分别检查，不为通过测试擅自更改现有配置。
 
-另一个私有测试 home 已运行真实原生 API/model 请求，取得 `DDL_HERMES_RUN_OK`；同键请求复用同一 run，重建 API adapter 后结果可恢复。证据位于 hub-server 的 `/home/owner-a/.cache/dots-duet-test-20261024/native-api-home/native-smoke-result.json`。它没有发送微信，也没有替换现有 Hermes 安装。
-
-适配测试须分别记录 Windows 与 Linux 结果。hub-server 原生 Python 3.13.16 按源码运行验证源码和 MCP 2.0.0，不表示 Python 3.14 发行包已安装到现网。实际 Go Hub 和微信交付须单独记录，不用上述外部接收端和原生 API 测试替代。
-
-`tests/hub_mcp_smoke.py` 是显式运行的真实 Hub 检查，须由绑定测试 UID 执行，并传入测试 socket 与预登记的平台、发送者和聊天。它验证真实 MCP 查询、参数引用不可更换和未绑定来源拒绝。它使用明确的测试来源，不声称该来源来自真实微信消息。
-
-hub-server 的独立公开运行环境位于 `/private/test-environment`，为 Python 3.14.8、MCP 2.0.0。其第三方 wheel 按本包锁文件下载，安装前后均校验 SHA-256；清单位于同级 `mcp-wheels/manifest.json`。附件切片完成后，实际绑定 UID 1002 下完整 29 项适配测试通过，包括硬链接拒绝与登记过期。Windows 同一套 29 项中 19 项通过、10 项明确跳过 Linux 接口。真实 Hub/MCP 查询也已通过。此环境不含模型或微信凭据。
-
-`tests/native_hub_smoke.py` 验证独立私有 home 中的真实官方 Hermes 模型、MCP、来源插件、Go Hub 与产物获取。它从原生会话接口读取实际工具调用，要求模型查询 session、Goal 和指定文本文件，并把实际标记和哈希记录为核验证据。脚本自身还读取私有副本核对字节。它不会把模型宣称完成当作测试通过，也不发送微信。
-
-直接嵌入 `APIServerAdapter` 的测试脚本须在同一进程调用官方 `discover_mcp_tools`，完整网关入口原本承担此启动步骤。另一个进程完成工具发现，不会填充当前模型进程的工具注册表。此测试 home 用官方 `tools.tool_search.enabled: off` 配置直接展示七个工具，便于逐条核对原生会话；默认 Tool Search 桥接模式须单独验证。
-
-原任务 `task_example` 的真实测试先暴露了上述启动遗漏。首个原生 run 明确报告工具不可用，未做任何工具调用。修复测试入口后，Hub 在预算内创建新的诊断 attempt；旧 run、session、key 和 request 保持不变。实际模型通过官方 MCP 和来源插件调用 session、goal、text、verification 与 followup 记录，原生 run 结束且跟进为 handled。没有重新提交 Codex 创建或继续操作。
-
-模型读取的原生会话状态为 `notLoaded`，Goal 接口仍实际返回 `{"goal":null}`。它读取授权文件，并把实际标记与 SHA-256 写进核验证据；测试另核对私有副本精确为标记加一个 LF，共 33 字节。结果与完整原生会话证据分别保存在上述私有测试 home 的 `native-hub-result.json`、`native-hub-transcript.json`，权限为 600。首次失败会话另存 `native-hub-first-attempt-transcript.json`。
-
-该次实测也暴露了同任务 `query=followups` 被 API 授权误拒的问题。Hub 修复后，`tests/hub_api_followups_smoke.py` 用保留的两个 API 会话、显式测试来源，经真实 MCP stdio 与 Hub 成功读取原任务两条记录；全局和其他任务查询仍被拒绝。复验没有调用模型，不改写原模型“无法独立读取旧收据”的实际记录。测试 API 已断开，私有测试进程已退出。没有微信交付证明。
-
-`tests/native_delivery_smoke.py` 在隔离 home 使用官方发送函数，仅通过公开 platform registry 替换外部网络 sender。fixture 实际收到同一 19 字节二进制文件和空正文；还覆盖错误路径、目标、MEDIA 注入、损坏哈希，以及不足以证明送达的原生回执。该结果不是实际微信送达。固定 Python/helper subprocess 的 stdin 边界也已运行验证。
-
-`tests/hub_native_delivery_smoke.py` 已在 `5894e750c3dba980d43b25aa29e3958149ba2c61` 运行真实三 hook、原生 retained media、私有附件注册、Go Hub、Windows Codex 二进制复制、worker 获取和官方发送 helper。只有入站渠道与出站网络使用 fixture；模型确实执行了文件复制。结果产物为 19 字节，SHA-256 为 `0160ee28442ea402e2861d477ea99cd321c991d144e3b254b5afe6543e903380`。文本和媒体各有一次发送 attempt，Hub 保留原始 fixture receipt 并标记 delivered。脚本末尾曾误读 stop 返回字段，清理后的状态已独立回读确认 paused；恢复证据为 `hub-native-delivery-recovered.json`。没有为修正该测试脚本重跑模型。Linux 临时副本随测试清理，结果不证明微信网络送达。
-
-官方 stable `v0.22.5`、commit `bf0203a794a07aac3ff764972ab9087baa4e4f4e` 的 Python 3.14.8 隔离运行时另通过两个无模型契约复验：`tests/native_ingress_smoke.py` 验证真实 PluginManager 三 hook、ContextVar、retained media、缺少绑定拒绝及仅私有 HTTP 注册含字节；`tests/native_delivery_smoke.py` 验证官方单文件发送和回执规则。前者的 HTTP 接收端是明确的外部测试 fixture，后者只替换外部网络 sender，不把这些契约复验称作 stable 上重跑完整模型链路。证据为 `stable-ingress-contract-result.json` 与 `stable-delivery-contract-result.json`。
+公开验证摘要见[验收记录](../../docs/验收记录.md)。真实会话、任务、来源、凭据与主机目录保存在私有记录中，仓库只保留可重跑脚本和证明范围。

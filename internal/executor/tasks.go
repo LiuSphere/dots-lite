@@ -147,11 +147,15 @@ func (s *Service) taskOperation(ctx context.Context, op protocol.Operation, clie
 		}
 		s.mu.Lock()
 		p, _ := s.projectLocked(task.ProjectID)
+		_, cwd, directoryErr := s.taskRootLocked(ctx, task)
 		s.mu.Unlock()
 		if !p.Available {
 			return failResult(r, "project_unavailable", "registered project directory is unavailable")
 		}
-		if _, err := client.Call(ctx, "thread/resume", map[string]any{"threadId": task.ThreadID, "cwd": p.Root, "approvalPolicy": p.ApprovalPolicy, "sandbox": p.Sandbox, "approvalsReviewer": "user"}); err != nil {
+		if directoryErr != nil {
+			return failResult(r, "working_directory_unavailable", directoryErr.Error())
+		}
+		if _, err := client.Call(ctx, "thread/resume", map[string]any{"threadId": task.ThreadID, "cwd": cwd, "approvalPolicy": p.ApprovalPolicy, "sandbox": p.Sandbox, "approvalsReviewer": "user"}); err != nil {
 			return failNativeResult(r, err)
 		}
 		goalStatus, err = readNativeGoalStatus(ctx, client, task.ThreadID)
@@ -211,6 +215,10 @@ func (s *Service) claimTask(ctx context.Context, task protocol.Task) error {
 	if !exists || !p.Available {
 		return errors.New("registered project directory is unavailable")
 	}
+	_, cwd, directoryErr := s.taskRootLocked(ctx, task)
+	if directoryErr != nil {
+		return directoryErr
+	}
 	latest, err := s.loadTask(ctx, task.ID)
 	if err != nil {
 		return err
@@ -228,7 +236,7 @@ func (s *Service) claimTask(ctx context.Context, task protocol.Task) error {
 			rows.Close()
 			return err
 		}
-		if rootsOverlap(p.Root, other) {
+		if rootsOverlap(cwd, other) {
 			rows.Close()
 			return errors.New("project is occupied by another task")
 		}

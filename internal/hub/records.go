@@ -37,23 +37,26 @@ type queryArgs struct {
 	TaskID      string `json:"task_id,omitempty"`
 	OperationID string `json:"operation_id,omitempty"`
 	ProjectID   string `json:"project_id,omitempty"`
+	FolderID    string `json:"folder_id,omitempty"`
 	Path        string `json:"path,omitempty"`
 	Offset      int64  `json:"offset,omitempty"`
 	Length      int64  `json:"length,omitempty"`
 	Cursor      string `json:"cursor,omitempty"`
 }
 type prepareArgs struct {
-	Action         string           `json:"action"`
-	TaskID         string           `json:"task_id,omitempty"`
-	ProjectID      string           `json:"project_id,omitempty"`
-	Input          string           `json:"input,omitempty"`
-	Name           string           `json:"name,omitempty"`
-	ExpectedTurnID string           `json:"expected_turn_id,omitempty"`
-	Goal           json.RawMessage  `json:"goal,omitempty"`
-	OutputSchema   json.RawMessage  `json:"output_schema,omitempty"`
-	Artifacts      []string         `json:"artifacts,omitempty"`
-	Upload         json.RawMessage  `json:"upload,omitempty"`
-	Inputs         []inputReference `json:"inputs,omitempty"`
+	Action           string           `json:"action"`
+	TaskID           string           `json:"task_id,omitempty"`
+	ProjectID        string           `json:"project_id,omitempty"`
+	FolderID         string           `json:"folder_id,omitempty"`
+	WorkingDirectory string           `json:"working_directory,omitempty"`
+	Input            string           `json:"input,omitempty"`
+	Name             string           `json:"name,omitempty"`
+	ExpectedTurnID   string           `json:"expected_turn_id,omitempty"`
+	Goal             json.RawMessage  `json:"goal,omitempty"`
+	OutputSchema     json.RawMessage  `json:"output_schema,omitempty"`
+	Artifacts        []string         `json:"artifacts,omitempty"`
+	Upload           json.RawMessage  `json:"upload,omitempty"`
+	Inputs           []inputReference `json:"inputs,omitempty"`
 }
 
 func decodeArgs(raw json.RawMessage, v any) error {
@@ -100,6 +103,10 @@ func (h *Hub) query(ctx context.Context, b Binding, raw json.RawMessage) (json.R
 	if err := decodeArgs(raw, &a); err != nil {
 		return nil, err
 	}
+	var err error
+	if a.ProjectID, err = folderID(a.ProjectID, a.FolderID); err != nil {
+		return nil, err
+	}
 	if a.Query == "machine" {
 		return json.Marshal(h.machine(b))
 	}
@@ -138,14 +145,14 @@ func (h *Hub) query(ctx context.Context, b Binding, raw json.RawMessage) (json.R
 		}
 	}
 	var result any
-	err := h.db.Update(ctx, func(tx *store.Tx) error {
+	err = h.db.Update(ctx, func(tx *store.Tx) error {
 		switch a.Query {
 		case "task":
 			t, err := loadTask(tx, b, a.TaskID)
 			if err != nil {
 				return err
 			}
-			result = t.Task
+			result = publicTask(t.Task)
 		case "operation":
 			o, err := loadOperation(tx, b, a.OperationID)
 			if err != nil {
@@ -157,7 +164,7 @@ func (h *Hub) query(ctx context.Context, b Binding, raw json.RawMessage) (json.R
 			if err != nil {
 				return err
 			}
-			out := []protocol.Task{}
+			out := []publicTaskView{}
 			for i, r := range rows {
 				if i == 100 {
 					break
@@ -166,7 +173,7 @@ func (h *Hub) query(ctx context.Context, b Binding, raw json.RawMessage) (json.R
 				if err := json.Unmarshal(r, &t); err != nil {
 					return err
 				}
-				out = append(out, t.Task)
+				out = append(out, publicTask(t.Task))
 			}
 			result = out
 		case "operations":
@@ -203,6 +210,13 @@ func (h *Hub) prepare(ctx context.Context, b Binding, inv *invocation, raw json.
 	var a prepareArgs
 	if err := decodeArgs(raw, &a); err != nil {
 		return nil, err
+	}
+	var err error
+	if a.ProjectID, err = folderID(a.ProjectID, a.FolderID); err != nil {
+		return nil, err
+	}
+	if a.WorkingDirectory != "" && !validWorkingDirectory(a.WorkingDirectory) {
+		return nil, failure("invalid_arguments", "working_directory must be a relative slash-separated path inside the authorized folder")
 	}
 	upload, inputs, err := resolvePrepareFiles(a, inv)
 	if err != nil {
@@ -246,7 +260,7 @@ func (h *Hub) prepare(ctx context.Context, b Binding, inv *invocation, raw json.
 			if !allowedProject(b, a.ProjectID) {
 				return failure("forbidden", "project is not authorized")
 			}
-			task = taskRecord{Task: protocol.Task{ID: taskID, Scope: b.scope(), Name: a.Name, Objective: a.Input, ProjectID: a.ProjectID, Version: 1, Execution: "prepared", Verification: "pending", Delivery: "pending", Artifacts: a.Artifacts, CreatedAt: now, UpdatedAt: now}, Source: source}
+			task = taskRecord{Task: protocol.Task{ID: taskID, Scope: b.scope(), Name: a.Name, Objective: a.Input, ProjectID: a.ProjectID, WorkingDirectory: workingDirectory(a.WorkingDirectory), Version: 1, Execution: "prepared", Verification: "pending", Delivery: "pending", Artifacts: a.Artifacts, CreatedAt: now, UpdatedAt: now}, Source: source}
 			if task.Name == "" {
 				task.Name = taskID
 			}
@@ -258,6 +272,9 @@ func (h *Hub) prepare(ctx context.Context, b Binding, inv *invocation, raw json.
 			}
 			if a.ProjectID != "" && a.ProjectID != task.ProjectID {
 				return failure("forbidden", "task project cannot be changed")
+			}
+			if a.WorkingDirectory != "" && a.WorkingDirectory != workingDirectory(task.WorkingDirectory) {
+				return failure("forbidden", "task working directory cannot be changed")
 			}
 			if task.Paused && a.Action != "task.continue" {
 				return failure("paused", "task is paused")
@@ -276,7 +293,7 @@ func (h *Hub) prepare(ctx context.Context, b Binding, inv *invocation, raw json.
 				return failure("unknown_conflict", "an earlier operation needs reconciliation")
 			}
 		}
-		o = operationRecord{Operation: protocol.Operation{ID: id, TaskID: taskID, Scope: b.scope(), TaskVersion: task.Version, ProjectID: task.ProjectID, Action: a.Action, ThreadID: task.ThreadID, ExpectedTurnID: a.ExpectedTurnID, Input: a.Input, Name: a.Name, Goal: a.Goal, OutputSchema: a.OutputSchema, Artifacts: a.Artifacts, Upload: upload, InputFiles: inputs}, Source: source, Stage: "prepared", CreatedAt: now, UpdatedAt: now}
+		o = operationRecord{Operation: protocol.Operation{ID: id, TaskID: taskID, Scope: b.scope(), TaskVersion: task.Version, ProjectID: task.ProjectID, WorkingDirectory: task.WorkingDirectory, Action: a.Action, ThreadID: task.ThreadID, ExpectedTurnID: a.ExpectedTurnID, Input: a.Input, Name: a.Name, Goal: a.Goal, OutputSchema: a.OutputSchema, Artifacts: a.Artifacts, Upload: upload, InputFiles: inputs}, Source: source, Stage: "prepared", CreatedAt: now, UpdatedAt: now}
 		if err := tx.Put("task", owner(b.scope()), taskID, task); err != nil {
 			return err
 		}

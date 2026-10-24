@@ -7,7 +7,9 @@ import (
 	"time"
 )
 
-const Version = 1
+// Version 2 requires task working-directory support. Version 1 executors would
+// otherwise ignore the selection and run in the authorization root.
+const Version = 2
 
 // Scope is supplied by authenticated configuration, never by a model argument.
 type Scope struct {
@@ -76,28 +78,29 @@ func (e *Error) Error() string { return e.Code + ": " + e.Message }
 
 // Operation is persisted before dispatch. Reusing ID cannot change its payload.
 type Operation struct {
-	ID             string          `json:"operation_id"`
-	TaskID         string          `json:"task_id"`
-	Scope          Scope           `json:"scope"`
-	TaskVersion    int64           `json:"task_version"`
-	ProjectID      string          `json:"project_id"`
-	Action         string          `json:"action"`
-	ThreadID       string          `json:"thread_id,omitempty"`
-	ExpectedTurnID string          `json:"expected_turn_id,omitempty"`
-	Input          string          `json:"input,omitempty"`
-	Name           string          `json:"name,omitempty"`
-	RequestID      string          `json:"request_id,omitempty"`
-	InstanceID     string          `json:"instance_id,omitempty"`
-	Reply          json.RawMessage `json:"reply,omitempty"`
-	Goal           json.RawMessage `json:"goal,omitempty"`
-	OutputSchema   json.RawMessage `json:"output_schema,omitempty"`
-	Path           string          `json:"path,omitempty"`
-	Cursor         string          `json:"cursor,omitempty"`
-	Offset         int64           `json:"offset,omitempty"`
-	Length         int64           `json:"length,omitempty"`
-	Artifacts      []string        `json:"artifacts,omitempty"`
-	Upload         *FileUpload     `json:"upload,omitempty"`
-	InputFiles     []FileUpload    `json:"input_files,omitempty"`
+	ID               string          `json:"operation_id"`
+	TaskID           string          `json:"task_id"`
+	Scope            Scope           `json:"scope"`
+	TaskVersion      int64           `json:"task_version"`
+	ProjectID        string          `json:"project_id"`
+	WorkingDirectory string          `json:"working_directory,omitempty"`
+	Action           string          `json:"action"`
+	ThreadID         string          `json:"thread_id,omitempty"`
+	ExpectedTurnID   string          `json:"expected_turn_id,omitempty"`
+	Input            string          `json:"input,omitempty"`
+	Name             string          `json:"name,omitempty"`
+	RequestID        string          `json:"request_id,omitempty"`
+	InstanceID       string          `json:"instance_id,omitempty"`
+	Reply            json.RawMessage `json:"reply,omitempty"`
+	Goal             json.RawMessage `json:"goal,omitempty"`
+	OutputSchema     json.RawMessage `json:"output_schema,omitempty"`
+	Path             string          `json:"path,omitempty"`
+	Cursor           string          `json:"cursor,omitempty"`
+	Offset           int64           `json:"offset,omitempty"`
+	Length           int64           `json:"length,omitempty"`
+	Artifacts        []string        `json:"artifacts,omitempty"`
+	Upload           *FileUpload     `json:"upload,omitempty"`
+	InputFiles       []FileUpload    `json:"input_files,omitempty"`
 }
 
 type Result struct {
@@ -111,23 +114,24 @@ type Result struct {
 }
 
 type Task struct {
-	ID           string          `json:"task_id"`
-	Scope        Scope           `json:"scope"`
-	Name         string          `json:"name"`
-	Objective    string          `json:"objective"`
-	ProjectID    string          `json:"project_id"`
-	ThreadID     string          `json:"thread_id,omitempty"`
-	TurnID       string          `json:"turn_id,omitempty"`
-	Version      int64           `json:"version"`
-	Paused       bool            `json:"paused"`
-	Execution    string          `json:"execution"`
-	Waiting      string          `json:"waiting,omitempty"`
-	Verification string          `json:"verification"`
-	Delivery     string          `json:"delivery"`
-	Evidence     json.RawMessage `json:"evidence,omitempty"`
-	Artifacts    []string        `json:"artifacts,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
+	ID               string          `json:"task_id"`
+	Scope            Scope           `json:"scope"`
+	Name             string          `json:"name"`
+	Objective        string          `json:"objective"`
+	ProjectID        string          `json:"project_id"`
+	WorkingDirectory string          `json:"working_directory,omitempty"`
+	ThreadID         string          `json:"thread_id,omitempty"`
+	TurnID           string          `json:"turn_id,omitempty"`
+	Version          int64           `json:"version"`
+	Paused           bool            `json:"paused"`
+	Execution        string          `json:"execution"`
+	Waiting          string          `json:"waiting,omitempty"`
+	Verification     string          `json:"verification"`
+	Delivery         string          `json:"delivery"`
+	Evidence         json.RawMessage `json:"evidence,omitempty"`
+	Artifacts        []string        `json:"artifacts,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
 // Event.Sequence is allocated by the executor and acknowledged after hub commit.
