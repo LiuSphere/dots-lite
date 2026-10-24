@@ -61,7 +61,9 @@ worker 使用 Hub 已保存的完整 request、session 和 idempotency key。响
 
 ## hub-server 实测范围
 
-以下目录是本轮测试的历史证据位置。临时测试运行时、账户、socket 与副本将在验收后清理，不作为永久可访问接口。最终留存证据由项目验收记录说明。
+本轮最终已将生产 Hermes 更新为 stable v0.22.5 / `bf0203a794a07aac3ff764972ab9087baa4e4f4e`，运行于独立 `/opt/hermes-agent-v0.22.5`。四个非 default profile 使用独立 UID，default 保留原账号。下文按版本保留历史实测；当前部署和边界见[验收记录](../../docs/验收记录.md)。
+
+以下目录是本轮测试的历史证据位置。临时测试运行时、账户、socket 与副本已在本轮收尾清理，不作为永久可访问接口。最终留存证据由项目验收记录说明。
 
 测试开始时，安装版 Hermes 为 `f97608f178d1ffeca59860195ab7da295f7c8e5f`，其 Python 为 3.13.16。该版缺少 `bound_session_key()`，本插件拒绝放行。此前未修改其核心或现有网关配置；这条历史结果不描述后续正式升级状态。
 
