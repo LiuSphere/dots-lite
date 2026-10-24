@@ -15,7 +15,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"dots-duet-lite/internal/protocol"
+	"dots-lite/internal/protocol"
 )
 
 const maxFileBytes = 8 << 20

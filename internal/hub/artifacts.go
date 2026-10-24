@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"dots-duet-lite/internal/protocol"
-	"dots-duet-lite/internal/store"
+	"dots-lite/internal/protocol"
+	"dots-lite/internal/store"
 )
 
 func validateUpload(upload *protocol.FileUpload) error {

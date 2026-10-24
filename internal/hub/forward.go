@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"dots-duet-lite/internal/protocol"
-	"dots-duet-lite/internal/store"
+	"dots-lite/internal/protocol"
+	"dots-lite/internal/store"
 )
 
 func (h *Hub) forwardQuery(ctx context.Context, b Binding, a queryArgs) (json.RawMessage, error) {

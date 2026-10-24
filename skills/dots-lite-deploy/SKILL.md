@@ -1,9 +1,9 @@
 ---
-name: lite-dots-deploy
-description: 部署或更新 Lite Dots（dots-duet-lite）的 Linux Hub、Windows 执行端和 Hermes profile 接入。用于收集服务器免交互 SSH 密钥、免密 sudo、部署目录与文件夹授权，配置隐藏自启并完成持久配对、验证和回滚准备。
+name: dots-lite-deploy
+description: 部署或更新 dots-lite 的 Linux Hub、Windows 执行端和 Hermes profile 接入。用于收集服务器免交互 SSH 密钥、免密 sudo、部署目录与文件夹授权，配置隐藏自启并完成持久配对、验证和回滚准备。
 ---
 
-# Lite Dots 部署
+# dots-lite 部署
 
 把用户的 Windows 执行电脑接到 Linux Hub 和指定 Hermes profile。交付可运行的后台服务、持久配对、明确的文件夹授权及实际验证记录。
 

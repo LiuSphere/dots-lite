@@ -4,7 +4,7 @@ import json
 import threading
 import unittest
 
-from dots_duet_lite_hermes.runs import RunsClient
+from dots_lite_hermes.runs import RunsClient
 
 
 class RunsTests(unittest.TestCase):

@@ -12,8 +12,8 @@ import tempfile
 import time
 import uuid
 
-from dots_duet_lite_hermes.client import HubClient
-from dots_duet_lite_hermes.worker import FollowupWorker
+from dots_lite_hermes.client import HubClient
+from dots_lite_hermes.worker import FollowupWorker
 
 
 async def smoke(options):
@@ -35,8 +35,8 @@ plugins:
 """)
         plugins = home / "plugins"
         plugins.mkdir()
-        import dots_duet_lite_hermes
-        (plugins / "dots-duet").symlink_to(Path(dots_duet_lite_hermes.__file__).parent, target_is_directory=True)
+        import dots_lite_hermes
+        (plugins / "dots-duet").symlink_to(Path(dots_lite_hermes.__file__).parent, target_is_directory=True)
         from hermes_cli.plugins import discover_plugins, get_plugin_manager
         from hermes_cli.lifecycle import ainvoke_hook, invoke_hook
         from gateway.session import SessionSource
@@ -125,7 +125,7 @@ plugins:
 
         # This is the only replaced boundary. No native channel network is called.
         platform_registry.register(replace(entry, standalone_sender_fn=fixture_sender))
-        from dots_duet_lite_hermes.delivery_helper import deliver
+        from dots_lite_hermes.delivery_helper import deliver
         class Sender:
             def send(self, item):
                 if item["task_id"] != task_id:

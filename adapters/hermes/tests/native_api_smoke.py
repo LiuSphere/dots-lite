@@ -10,7 +10,7 @@ import sys
 import time
 import uuid
 
-from dots_duet_lite_hermes.runs import RunsClient
+from dots_lite_hermes.runs import RunsClient
 
 
 async def smoke(home, source):

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"dots-duet-lite/internal/protocol"
+	"dots-lite/internal/protocol"
 )
 
 type inputReference struct {

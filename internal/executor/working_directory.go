@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"dots-duet-lite/internal/protocol"
+	"dots-lite/internal/protocol"
 )
 
 func workingDirectory(name string) (string, error) {

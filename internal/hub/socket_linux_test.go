@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"dots-duet-lite/internal/hub"
-	"dots-duet-lite/internal/store"
+	"dots-lite/internal/hub"
+	"dots-lite/internal/store"
 )
 
 func TestUnixListenerRecoversAnOwnedStaleSocket(t *testing.T) {

@@ -4,7 +4,7 @@ import (
 	"io/fs"
 	"strings"
 
-	"dots-duet-lite/internal/protocol"
+	"dots-lite/internal/protocol"
 )
 
 func folderID(project, folder string) (string, error) {

@@ -12,9 +12,9 @@ import time
 from urllib.parse import quote
 import uuid
 
-from dots_duet_lite_hermes.client import HubClient
-from dots_duet_lite_hermes.runs import RunsClient
-from dots_duet_lite_hermes.worker import FollowupWorker
+from dots_lite_hermes.client import HubClient
+from dots_lite_hermes.runs import RunsClient
+from dots_lite_hermes.worker import FollowupWorker
 
 
 async def smoke(options):

@@ -1,7 +1,7 @@
 [project]
-name = "dots-duet-lite-hermes"
+name = "dots-lite-hermes"
 version = "0.1.0"
-description = "Hermes tool and background event adapter for dots-duet-lite"
+description = "Hermes tool and background event adapter for dots-lite"
 requires-python = ">=3.14,<3.15"
 dependencies = [
     "mcp==2.0.0",

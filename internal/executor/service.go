@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"dots-duet-lite/internal/protocol"
+	"dots-lite/internal/protocol"
 	_ "modernc.org/sqlite"
 )
 

@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from dots_duet_lite_hermes.plugin import SourcePlugin
+from dots_lite_hermes.plugin import SourcePlugin
 
 
 class PluginTests(unittest.TestCase):

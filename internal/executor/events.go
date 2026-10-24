@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"dots-duet-lite/internal/protocol"
+	"dots-lite/internal/protocol"
 )
 
 type pendingRequest struct {

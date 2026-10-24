@@ -11,8 +11,8 @@ import (
 	"os"
 	"time"
 
-	"dots-duet-lite/internal/hub"
-	"dots-duet-lite/internal/store"
+	"dots-lite/internal/hub"
+	"dots-lite/internal/store"
 )
 
 func run(ctx context.Context, args []string, stderr io.Writer) (err error) {

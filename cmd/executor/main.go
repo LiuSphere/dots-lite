@@ -13,15 +13,15 @@ import (
 	"syscall"
 	"time"
 
-	"dots-duet-lite/internal/executor"
-	"dots-duet-lite/internal/protocol"
+	"dots-lite/internal/executor"
+	"dots-lite/internal/protocol"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, "dots-duet-lite executor:", err)
+		fmt.Fprintln(os.Stderr, "dots-lite executor:", err)
 		os.Exit(1)
 	}
 }

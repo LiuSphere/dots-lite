@@ -23,7 +23,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
     async def test_folder_tools_preserve_chosen_directory_over_real_stdio(self):
         with hub_peer(responder=lambda path, body: {"accepted": True}) as (socket_path, requests):
             params = StdioServerParameters(
-                command=sys.executable, args=["-m", "dots_duet_lite_hermes"],
+                command=sys.executable, args=["-m", "dots_lite_hermes"],
                 env={**os.environ, "DOTS_DUET_SOCKET": socket_path},
             )
             async with asyncio.timeout(10):
@@ -46,7 +46,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
     async def test_attachment_tools_forward_references_and_reject_model_supplied_bytes(self):
         with hub_peer(responder=lambda path, body: {"operation_id": "attachment-operation"}) as (socket_path, requests):
             params = StdioServerParameters(
-                command=sys.executable, args=["-m", "dots_duet_lite_hermes"],
+                command=sys.executable, args=["-m", "dots_lite_hermes"],
                 env={**os.environ, "DOTS_DUET_SOCKET": socket_path},
             )
             async with asyncio.timeout(10):
@@ -70,7 +70,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
     async def test_unbound_tool_call_is_rejected_over_real_stdio(self):
         params = StdioServerParameters(
             command=sys.executable,
-            args=["-m", "dots_duet_lite_hermes"],
+            args=["-m", "dots_lite_hermes"],
             env=dict(os.environ),
         )
         async with asyncio.timeout(10):
@@ -87,7 +87,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
     async def test_bound_query_reaches_hub_with_original_arguments(self):
         with hub_peer() as (socket_path, requests):
             params = StdioServerParameters(
-                command=sys.executable, args=["-m", "dots_duet_lite_hermes"],
+                command=sys.executable, args=["-m", "dots_lite_hermes"],
                 env={**os.environ, "DOTS_DUET_SOCKET": socket_path},
             )
             async with asyncio.timeout(10):
@@ -123,7 +123,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
 
         with hub_peer(responder) as (socket_path, requests):
             params = StdioServerParameters(
-                command=sys.executable, args=["-m", "dots_duet_lite_hermes"],
+                command=sys.executable, args=["-m", "dots_lite_hermes"],
                 env={**os.environ, "DOTS_DUET_SOCKET": socket_path},
             )
             async with asyncio.timeout(10):
@@ -154,7 +154,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 with tempfile.TemporaryDirectory() as files:
                     with hub_peer(lambda path, body: payload) as (socket_path, requests):
                         params = StdioServerParameters(
-                            command=sys.executable, args=["-m", "dots_duet_lite_hermes"],
+                            command=sys.executable, args=["-m", "dots_lite_hermes"],
                             env={**os.environ, "DOTS_DUET_SOCKET": socket_path, "DOTS_DUET_FILES_DIR": files},
                         )
                         async with asyncio.timeout(10):
@@ -270,7 +270,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
         if files:
             environment["DOTS_DUET_FILES_DIR"] = files
         params = StdioServerParameters(
-            command=sys.executable, args=["-m", "dots_duet_lite_hermes"], env=environment,
+            command=sys.executable, args=["-m", "dots_lite_hermes"], env=environment,
         )
         async with asyncio.timeout(10):
             async with stdio_client(params) as streams:

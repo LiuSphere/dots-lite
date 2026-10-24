@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from dots_duet_lite_hermes.worker import FollowupWorker
+from dots_lite_hermes.worker import FollowupWorker
 
 
 class WorkerTests(unittest.TestCase):

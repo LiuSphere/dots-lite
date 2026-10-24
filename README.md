@@ -1,4 +1,4 @@
-# dots-duet-lite
+# dots-lite
 
 云端 Agent 固定采用 服务器 上的 Hermes，通过微信协调自己电脑上的 Codex 任务。参考 Dots 的本地任务控制与 Claude Duet 的任务、产物和通知组织，先做日常可用的轻量实现。
 
@@ -8,7 +8,7 @@
 
 复用边界：不修改 Hermes 源码、内部数据库结构或 Agent 循环。MCP 客户端、人工确认、后台 runs 与微信收发复用 Hermes；会话历史、审批等待、线程内 Goal、文件与命令接口复用 Codex app-server。我们只补跨机器授权与传输、业务任务/操作记录、暂停意图、累计恢复预算、核验和交付。具体能力与未验证范围见实现方案第 13、16 节。
 
-使用入口：[微信用户使用指南](docs/使用指南.md)、[管理员部署与运行指南](docs/运行指南.md)、[部署 skill](skills/lite-dots-deploy/SKILL.md)。
+使用入口：[微信用户使用指南](docs/使用指南.md)、[管理员部署与运行指南](docs/运行指南.md)、[部署 skill](skills/dots-lite-deploy/SKILL.md)。
 
 部署 skill 会收集服务器免交互 SSH 密钥路径、免密 sudo、目标 profile、双端部署目录及授权文件夹。仓库中的账号、地址和目录示例均为占位值；真实部署记录、私钥、token 和聊天标识保存在仓库外或被忽略的私有目录。通用记录格式见[部署记录模板](docs/部署记录模板.md)。
 
@@ -27,7 +27,7 @@ adapters/hermes/         Python 薄适配包与 uv 环境
 docs/                    需求与详细实现方案
 ```
 
-Go 模块为 `dots-duet-lite`，使用 Go 1.27.3、WebSocket、SQLite 与系统进程控制。依赖及校验在 `go.mod` 和 `go.sum`。Hub 依赖 Linux Unix socket 的真实对端 UID，不在 Windows 上提供降级身份认证。
+Go 模块为 `dots-lite`，使用 Go 1.27.3、WebSocket、SQLite 与系统进程控制。依赖及校验在 `go.mod` 和 `go.sum`。Hub 依赖 Linux Unix socket 的真实对端 UID，不在 Windows 上提供降级身份认证。
 
 Python 适配包采用 uv，使用 Python `>=3.14,<3.15` 与 MCP 2.0.0；锁文件位于 `adapters/hermes/`。来源插件仅依赖标准库，可在 Hermes 自己的 Python 中加载。MCP worker 与 Hermes 环境分别安装，不复制模型、微信或管理员凭据。
 

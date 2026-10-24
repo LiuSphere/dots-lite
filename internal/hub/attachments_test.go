@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"dots-duet-lite/internal/protocol"
+	"dots-lite/internal/protocol"
 	"github.com/coder/websocket/wsjson"
 )
 

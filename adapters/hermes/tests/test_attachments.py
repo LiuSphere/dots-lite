@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from dots_duet_lite_hermes.plugin import SourcePlugin
+from dots_lite_hermes.plugin import SourcePlugin
 
 
 class AttachmentTests(unittest.TestCase):

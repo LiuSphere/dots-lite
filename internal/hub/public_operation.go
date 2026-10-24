@@ -1,6 +1,6 @@
 package hub
 
-import "dots-duet-lite/internal/protocol"
+import "dots-lite/internal/protocol"
 
 type publicFile struct {
 	Name   string `json:"name"`

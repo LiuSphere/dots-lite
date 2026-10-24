@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"dots-duet-lite/internal/protocol"
-	"dots-duet-lite/internal/store"
+	"dots-lite/internal/protocol"
+	"dots-lite/internal/store"
 )
 
 type AllowedSource struct {

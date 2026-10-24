@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"dots-duet-lite/internal/protocol"
+	"dots-lite/internal/protocol"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 )

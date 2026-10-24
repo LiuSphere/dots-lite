@@ -15,16 +15,18 @@ uv run --project adapters/hermes python -m unittest discover -s adapters/hermes/
 
 发行包使用 Python `>=3.14,<3.15` 与 `mcp==2.0.0`。Windows 不支持本包要求的 UID Unix socket；其 socket 集成测试明确跳过，须在 Linux 运行。
 
-为每个隔离 Linux UID 配置独立的 `DOTS_DUET_SOCKET`。Hermes 原生 MCP 配置的服务器名必须为 `dots_duet`，命令为该包环境的 `python -m dots_duet_lite_hermes`。标准输出只传 MCP 消息。不要把 socket 路径、profile 身份或调用引用交给模型选择。
+为每个隔离 Linux UID 配置独立的 `DOTS_DUET_SOCKET`。Hermes 原生 MCP 配置的服务器名必须为 `dots_duet`，命令为该包环境的 `python -m dots_lite_hermes`。标准输出只传 MCP 消息。不要把 socket 路径、profile 身份或调用引用交给模型选择。
+
+项目更名为 `dots-lite` 后，更新已有部署时须同步修改 MCP 与 worker 的 Python 模块入口和插件源码链接。现有 `dots_duet` 服务器名、`duet_*` 工具、`DOTS_DUET_*` 环境变量及数据目录保持兼容。
 
 来源插件所在的 Hermes 网关父进程也必须配置 `DOTS_DUET_SOCKET`，不能只设置 MCP 子进程的 env。网关、MCP 和 worker 使用同一 profile UID、HOME、HERMES_HOME 与 DOTS_DUET_FILES_DIR；socket 可由同一个 Hub 提供，再按真实对端 UID 授权。
 
-把 `src/dots_duet_lite_hermes/` 作为 Hermes 官方目录插件加载。`plugin.yaml` 声明 `pre_gateway_dispatch`、`post_gateway_admission` 与 `pre_tool_call`，`__init__.py` 是注册入口。插件仅使用标准库，不要求把 MCP SDK 安装进 Hermes 的 Python 环境。插件必须运行在原生消息任务内；缺少当前绑定或可信来源时明确阻止调用。
+把 `src/dots_lite_hermes/` 作为 Hermes 官方目录插件加载。`plugin.yaml` 声明 `pre_gateway_dispatch`、`post_gateway_admission` 与 `pre_tool_call`，`__init__.py` 是注册入口。插件仅使用标准库，不要求把 MCP SDK 安装进 Hermes 的 Python 环境。插件必须运行在原生消息任务内；缺少当前绑定或可信来源时明确阻止调用。
 
 后台跟进使用独立进程：
 
 ```text
-python -m dots_duet_lite_hermes worker --socket /run/duet/profile.sock --api-url http://127.0.0.1:8642 --api-token-file /private/profile/api-token --hermes-python /opt/hermes/venv/bin/python --hermes-source /opt/hermes/source
+python -m dots_lite_hermes worker --socket /run/duet/profile.sock --api-url http://127.0.0.1:8642 --api-token-file /private/profile/api-token --hermes-python /opt/hermes/venv/bin/python --hermes-source /opt/hermes/source
 ```
 
 加 `--once` 只处理一次，失败退出非零；它仍可能调用模型或发送原聊天队列，不能用作只读健康检查。常驻模式每五秒查询，错误写标准错误。API URL 固定来自运维配置，使用根地址、不加 `/v1`，不由模型传入；不跟随重定向。token 文件只放裸 token，在 Linux 必须不向组或其他用户开放。原生 API 必须声明持久幂等支持，否则适配拒绝启动模型请求。

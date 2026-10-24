@@ -24,8 +24,8 @@ async def smoke(options):
         (home / "config.yaml").write_text("plugins:\n  enabled: [dots-duet]\n")
         plugins = home / "plugins"
         plugins.mkdir()
-        import dots_duet_lite_hermes
-        (plugins / "dots-duet").symlink_to(Path(dots_duet_lite_hermes.__file__).parent, target_is_directory=True)
+        import dots_lite_hermes
+        (plugins / "dots-duet").symlink_to(Path(dots_lite_hermes.__file__).parent, target_is_directory=True)
         from hermes_cli.plugins import discover_plugins, get_plugin_manager
         from hermes_cli.lifecycle import ainvoke_hook, invoke_hook
         from gateway.session import SessionSource

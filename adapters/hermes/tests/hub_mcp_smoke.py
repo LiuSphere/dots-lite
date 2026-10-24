@@ -10,7 +10,7 @@ import uuid
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from dots_duet_lite_hermes.client import HubClient, HubError
+from dots_lite_hermes.client import HubClient, HubError
 
 
 async def smoke(options):
@@ -25,7 +25,7 @@ async def smoke(options):
         "tool": "duet_query", "arguments": arguments, "source": source,
     })
     params = StdioServerParameters(
-        command=sys.executable, args=["-m", "dots_duet_lite_hermes"],
+        command=sys.executable, args=["-m", "dots_lite_hermes"],
         env={**os.environ, "DOTS_DUET_SOCKET": options.socket},
     )
     async with asyncio.timeout(15):

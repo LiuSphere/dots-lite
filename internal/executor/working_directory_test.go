@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"dots-duet-lite/internal/executor"
-	"dots-duet-lite/internal/protocol"
+	"dots-lite/internal/executor"
+	"dots-lite/internal/protocol"
 )
 
 func TestServiceUsesSelectedExistingWorkingDirectoryForNativeCreate(t *testing.T) {

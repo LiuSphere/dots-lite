@@ -6,8 +6,8 @@ import (
 	"errors"
 	"time"
 
-	"dots-duet-lite/internal/protocol"
-	"dots-duet-lite/internal/store"
+	"dots-lite/internal/protocol"
+	"dots-lite/internal/store"
 )
 
 func (h *Hub) recoverRecords(ctx context.Context) error {

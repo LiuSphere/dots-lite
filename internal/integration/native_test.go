@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"dots-duet-lite/internal/executor"
-	"dots-duet-lite/internal/protocol"
+	"dots-lite/internal/executor"
+	"dots-lite/internal/protocol"
 )
 
 // This opt-in check uses the installed Codex account and a real model turn.

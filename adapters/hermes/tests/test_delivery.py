@@ -4,7 +4,7 @@ import sys
 import tempfile
 from unittest.mock import patch
 
-from dots_duet_lite_hermes.worker import FollowupWorker
+from dots_lite_hermes.worker import FollowupWorker
 
 
 class DeliveryWorkerTests(unittest.TestCase):
@@ -60,7 +60,7 @@ class DeliveryWorkerTests(unittest.TestCase):
         self.assertNotIn("definitely_not_sent", hub.report)
 
     def test_native_sender_timeout_is_unknown_even_if_partial_output_claims_success(self):
-        from dots_duet_lite_hermes.delivery import NativeSender
+        from dots_lite_hermes.delivery import NativeSender
         with tempfile.TemporaryDirectory() as directory:
             sender = NativeSender(sys.executable, directory, directory)
             with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(["fixed"], 1, output='{"success":true}')):

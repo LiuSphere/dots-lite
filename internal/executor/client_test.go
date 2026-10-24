@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"dots-duet-lite/internal/executor"
+	"dots-lite/internal/executor"
 )
 
 func TestStartInitializesBeforeCalling(t *testing.T) {

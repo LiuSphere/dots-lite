@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"dots-duet-lite/internal/store"
+	"dots-lite/internal/store"
 )
 
 type recordArgs struct {

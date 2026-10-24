@@ -15,7 +15,7 @@ from .delivery import NativeSender
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Profile-local dots-duet MCP and native Hermes followup adapter")
+    parser = argparse.ArgumentParser(description="Profile-local dots-lite MCP and native Hermes followup adapter")
     commands = parser.add_subparsers(dest="command")
     worker = commands.add_parser("worker", help="bridge hub followups to this profile's native Hermes runs")
     worker.add_argument("--socket", required=True)

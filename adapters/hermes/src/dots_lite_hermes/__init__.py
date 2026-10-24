@@ -1,4 +1,4 @@
-"""Hermes tool and background event adapter for dots-duet-lite."""
+"""Hermes tool and background event adapter for dots-lite."""
 
 
 def register(ctx):

@@ -12,9 +12,9 @@ from pathlib import Path
 import time
 import uuid
 
-from dots_duet_lite_hermes.client import HubClient
-from dots_duet_lite_hermes.downloads import materialize_download
-from dots_duet_lite_hermes.worker import FollowupWorker
+from dots_lite_hermes.client import HubClient
+from dots_lite_hermes.downloads import materialize_download
+from dots_lite_hermes.worker import FollowupWorker
 
 
 def smoke(options):

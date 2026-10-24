@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	"dots-duet-lite/internal/protocol"
+	"dots-lite/internal/protocol"
 )
 
 func (s *Service) taskOperation(ctx context.Context, op protocol.Operation, client *Client) protocol.Result {

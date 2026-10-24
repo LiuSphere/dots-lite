@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"dots-duet-lite/internal/protocol"
-	"dots-duet-lite/internal/store"
+	"dots-lite/internal/protocol"
+	"dots-lite/internal/store"
 )
 
 func checkAPIAttempt(tx *store.Tx, b Binding, source protocol.Source) error {

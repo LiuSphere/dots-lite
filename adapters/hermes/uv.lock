@@ -141,7 +141,7 @@ wheels = [
 ]
 
 [[package]]
-name = "dots-duet-lite-hermes"
+name = "dots-lite-hermes"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

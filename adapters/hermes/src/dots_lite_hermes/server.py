@@ -57,7 +57,7 @@ def create_server():
         return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False))])
 
     return Server(
-        "dots-duet-lite", version="0.1.0",
+        "dots-lite", version="0.1.0",
         on_list_tools=list_tools, on_call_tool=call_tool,
     )
 

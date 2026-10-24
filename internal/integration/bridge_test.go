@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"dots-duet-lite/internal/executor"
-	"dots-duet-lite/internal/hub"
-	"dots-duet-lite/internal/protocol"
-	"dots-duet-lite/internal/store"
+	"dots-lite/internal/executor"
+	"dots-lite/internal/hub"
+	"dots-lite/internal/protocol"
+	"dots-lite/internal/store"
 )
 
 func TestBridgeRunsRegisteredTaskWithoutRepeatingExecution(t *testing.T) {

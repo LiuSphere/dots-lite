@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"dots-duet-lite/internal/protocol"
+	"dots-lite/internal/protocol"
 )
 
 func (s *Service) respondOperation(ctx context.Context, op protocol.Operation, client *Client) protocol.Result {

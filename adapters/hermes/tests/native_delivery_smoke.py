@@ -50,7 +50,7 @@ plugins:
 
         # Public platform registry replaces ONLY the network sender boundary.
         platform_registry.register(replace(entry, standalone_sender_fn=fixture_sender))
-        from dots_duet_lite_hermes.delivery_helper import deliver
+        from dots_lite_hermes.delivery_helper import deliver
         files = home / "files"
         files.mkdir(mode=0o700)
         path = files / "fixture.bin"
@@ -110,7 +110,7 @@ plugins:
         text = deliver({**payload, "kind": "text", "text": "A question needs your answer"}, source, files)
         if text["status"] != "delivered" or received[-1]["message"] != "A question needs your answer" or received[-1]["media"]:
             raise RuntimeError("Text notification was not sent as exactly one text-only unit")
-        from dots_duet_lite_hermes.delivery import NativeSender
+        from dots_lite_hermes.delivery import NativeSender
         process_result = NativeSender(sys.executable, source, files).send({
             **payload, "target": {"platform": "weixin", "chat_id": ""},
         })

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"dots-duet-lite/internal/executor"
+	"dots-lite/internal/executor"
 	"golang.org/x/sys/windows"
 )
 

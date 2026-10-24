@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"dots-duet-lite/internal/protocol"
-	"dots-duet-lite/internal/store"
+	"dots-lite/internal/protocol"
+	"dots-lite/internal/store"
 )
 
 func (h *Hub) stop(ctx context.Context, b Binding, source protocol.Source, taskID string) (json.RawMessage, error) {
