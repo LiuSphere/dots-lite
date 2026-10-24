@@ -9,13 +9,16 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
+	"syscall"
 	"time"
 
 	"dots-duet-lite/internal/executor"
+	"dots-duet-lite/internal/protocol"
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "dots-duet-lite executor:", err)
@@ -23,11 +26,11 @@ func main() {
 	}
 }
 
-// run currently exposes only the first-stage, read-only app-server probe.
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err error) {
 	flags := flag.NewFlagSet("executor", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	probe := flags.Bool("probe", false, "initialize a separate local app-server and check account configuration without running a model")
+	configPath := flags.String("config", "", "private executor JSON configuration for the persistent control service")
 	codex := flags.String("codex", "codex", "Codex executable path")
 	timeout := flags.Duration("timeout", 15*time.Second, "deadline for the complete probe")
 	if err := flags.Parse(args); err != nil {
@@ -36,8 +39,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err erro
 		}
 		return err
 	}
-	if !*probe || flags.NArg() != 0 {
-		return errors.New("use -probe for the local read-only check; the remote execution service is not implemented")
+	if flags.NArg() != 0 || (*probe && *configPath != "") || (!*probe && *configPath == "") {
+		return errors.New("choose -probe or -config <private JSON file>")
+	}
+	if *configPath != "" {
+		return runService(ctx, *configPath, stderr)
 	}
 	if *timeout <= 0 {
 		return errors.New("timeout must be greater than zero")
@@ -80,4 +86,65 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err erro
 		InferenceVerified:   false,
 		DesktopChatAttached: false,
 	})
+}
+
+type serviceConfig struct {
+	Scope     protocol.Scope     `json:"scope"`
+	Projects  []protocol.Project `json:"projects"`
+	StatePath string             `json:"state_path"`
+	HubURL    string             `json:"hub_url"`
+	TokenFile string             `json:"token_file"`
+	Codex     string             `json:"codex"`
+}
+
+func runService(ctx context.Context, configPath string, stderr io.Writer) (err error) {
+	file, err := os.Open(configPath)
+	if err != nil {
+		return fmt.Errorf("open executor configuration: %w", err)
+	}
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	var cfg serviceConfig
+	decodeErr := decoder.Decode(&cfg)
+	if decodeErr == nil {
+		var extra any
+		if next := decoder.Decode(&extra); next == nil {
+			decodeErr = errors.New("configuration must contain one JSON object")
+		} else if !errors.Is(next, io.EOF) {
+			decodeErr = next
+		}
+	}
+	if err := errors.Join(decodeErr, file.Close()); err != nil {
+		return fmt.Errorf("read executor configuration: %w", err)
+	}
+	if cfg.HubURL == "" || cfg.TokenFile == "" {
+		return errors.New("hub_url and token_file are required")
+	}
+	tokenFile, err := os.Open(cfg.TokenFile)
+	if err != nil {
+		return fmt.Errorf("open executor token: %w", err)
+	}
+	tokenBytes, readErr := io.ReadAll(io.LimitReader(tokenFile, 4097))
+	if err := errors.Join(readErr, tokenFile.Close()); err != nil {
+		return fmt.Errorf("read executor token: %w", err)
+	}
+	token := strings.TrimSpace(string(tokenBytes))
+	if token == "" || len(tokenBytes) > 4096 {
+		return errors.New("executor token must contain 1 to 4096 bytes")
+	}
+	if cfg.Codex == "" {
+		cfg.Codex = "codex"
+	}
+	service, err := executor.NewService(executor.ServiceConfig{
+		Scope: cfg.Scope, Projects: cfg.Projects, StatePath: cfg.StatePath,
+		Native: executor.Options{
+			Command: []string{cfg.Codex, "app-server", "--listen", "stdio://"},
+			Stderr:  stderr,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, service.Close()) }()
+	return service.Run(ctx, cfg.HubURL, token)
 }

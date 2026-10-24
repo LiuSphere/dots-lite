@@ -1,0 +1,7 @@
+name: dots-duet
+version: 0.1.0
+description: Bind dots-duet MCP tool calls to the current trusted Hermes message context.
+provides_hooks:
+  - pre_gateway_dispatch
+  - post_gateway_admission
+  - pre_tool_call

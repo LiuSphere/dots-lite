@@ -2,28 +2,28 @@
 
 云端 Agent 固定采用 hub-server 上的 Hermes，通过微信协调自己电脑上的 Codex 任务。参考 Dots 的本地任务控制与 Claude Duet 的任务、产物和通知组织，先做日常可用的轻量实现。
 
-项目状态：目录、依赖与 Git 仓库已初始化，业务功能尚未实现或部署。
+项目状态：Hub、执行端和 Hermes MCP 已实现，真实 Codex、跨机器文件传输及 Hermes 核验已通过。聊天交付与最终部署仍在验证；完整结果见[验收记录](docs/验收记录.md)和[实现进度](docs/实现进度.md)。
 
 当前主线：各用户的 Codex 执行端运行专用控制服务，直接接入官方 Codex app-server；hub-server 上各 Hermes profile 只操作其用户绑定的执行端。当前先验证 Windows，其他用户执行端的操作系统尚未核实。重点是 Codex 会话控制与任务文件获取：支持产物自动回传，也允许 Hermes 主动查询、读取和下载授权任务文件。文件写入和通用 Shell 按具体场景后续评估。HAPI 保留为备选。
 
-相关材料：[需求](docs/需求.md)、[详细实现方案](docs/详细实现方案.md)。需求定义范围与验收，方案按提交、会话选择、执行、审批、恢复、文件获取和交付解释实现方式。
+相关材料：[需求](docs/需求.md)、[详细实现方案](docs/详细实现方案.md)、[Hermes 运行说明](adapters/hermes/README.md)。需求定义范围与验收，方案解释实现方式，验收记录区分真实运行与协议替身。
 
-## 开发初始化
+## 开发与检查
 
 ```text
 cmd/hub/                 Go 远端服务入口
 cmd/executor/            Go 执行端入口
-internal/protocol/       两端共用协议，待实现
-internal/hub/            远端任务与跟进逻辑，待实现
-internal/executor/       Codex 进程和会话控制，待实现
-internal/store/          本地状态存储，待实现
+internal/protocol/       两端共用业务协议
+internal/hub/            授权、任务、事件与业务跟进
+internal/executor/       Codex 进程、会话与授权文件操作
+internal/store/          SQLite 事务存储
 adapters/hermes/         Python 薄适配包与 uv 环境
 docs/                    需求与详细实现方案
 ```
 
-Go 模块名暂用 `dots-duet-lite`，远程仓库为 `https://github.com/Heironghuncheng/lite-dots.git`。使用 Go 1.27.3，已登记 `github.com/coder/websocket v1.8.15` 和 `modernc.org/sqlite v1.61.0` 及其依赖，校验记录在 `go.sum`。依赖为后续实现预先准备，当前占位入口尚未调用；此时执行 `go mod tidy` 会移除未使用的依赖，实现真实引用后再整理。
+Go 模块为 `dots-duet-lite`，使用 Go 1.27.3、WebSocket、SQLite 与系统进程控制。依赖及校验在 `go.mod` 和 `go.sum`。Hub 依赖 Linux Unix socket 的真实对端 UID，不在 Windows 上提供降级身份认证。
 
-Python 适配包采用 uv，使用 Python 3.14，版本范围为 `>=3.14,<3.15`，与当前 Hermes 上游声明范围相容。`pyproject.toml`、`uv.lock` 和 `.python-version` 均位于 `adapters/hermes/`；本地虚拟环境不纳入 Git。当前没有额外 Python 运行依赖，不重复安装 Hermes，也不预先绑定尚未确定的本机接口库。开发环境兼容不代表已验证 hub-server 的 Hermes 安装。
+Python 适配包采用 uv，使用 Python `>=3.14,<3.15` 与 MCP 2.0.0；锁文件位于 `adapters/hermes/`。来源插件仅依赖标准库，可在 Hermes 自己的 Python 中加载。MCP worker 与 Hermes 环境分别安装，不复制模型、微信或管理员凭据。
 
 在项目根目录执行：
 
@@ -38,7 +38,7 @@ go build -o dist/executor.exe ./cmd/executor
 uv sync --project adapters/hermes --locked
 ```
 
-这些 Windows 构建命令只验证骨架可编译。两个入口尚未实现业务，运行时会明确报错并退出；Python 包也只是空的适配入口。依赖、构建输出、虚拟环境和 Git 初始化不能视为 Codex 控制流程已经可用。
+普通 `go test ./...` 不启动真实模型。显式设置 `DOTS_DUET_REAL_CODEX=1` 后，集成测试才在临时项目调用真实 Codex，验证文件及重启后继续原会话。执行端使用 `-config <私有 JSON>` 常驻运行，也可用 `-probe` 做无模型就绪检查。Hub 在 Linux 使用 `-config`、`-state`、`-socket`、`-listen` 启动；所有实际验收范围均见验收记录。
 
 ## 需求范围
 
@@ -90,7 +90,7 @@ Hermes 主动跟进 Codex，先自行查证并处理目标、权限和恢复路�
 - 机器就绪、项目列表、任务快照和简单文件查询由程序直接返回，不为每次查询启动 Codex 模型任务。首版通过微信文本和 Hermes 工具显示任务列表，不另造控制台。
 - 本机服务另外提供任务文件获取接口。产物经它传到 hub-server 后，Hermes 得到该 profile 可访问的副本或附件引用，再检查、整理或发回微信；这些接口由我们实现，不是假定 Codex 已自动上传文件。
 
-这是已选择的方案方向，尚未安装、实现或部署。首阶段不引入 HAPI Hub/Runner，也不同时维护两套后端。若直接集成出现具体阻碍，再评估 HAPI；不能因其可控制自己启动的会话，就认为它可以接管桌面已有活跃聊天。
+本轮已经实现这条直接接入链路。HAPI 仍为备选，不同时维护第二套后端。恢复历史会话与接管桌面已有活跃聊天不同，后者尚未验收。
 
 ### 多 profile 与执行端隔离
 
@@ -102,7 +102,7 @@ Hermes 主动跟进 Codex，先自行查证并处理目标、权限和恢复路�
 - 事件按原任务归属返回原 profile 和微信聊天；某端离线时只报告该端不可用，不自动转给其他用户的执行端。重连也必须恢复原绑定。
 - 执行端凭据、Codex 登录、`CODEX_HOME`、项目路径和本地数据库分别保存。公共工具代码可以复用，授权配置和用户数据不能随公共配置同步。
 
-这些是待实现的应用授权要求。Hermes profile 本身不应被当作已验证的操作系统安全隔离边界。
+应用授权已实现并经过隔离账号测试。正式环境仍须用独立 Linux UID 和私有目录部署，不能只靠 profile 名称提供操作系统隔离。
 
 同一 profile 绑定的电脑内可以存在多个 Codex 会话。控制服务按实际 `threadId` 和 `turnId` 调度，聊天当前选择不由后台事件覆盖。第一版计划一台电脑使用一个受控 app-server 管理多个会话；独立进程及原生桌面活跃会话的接入另行验证。
 
@@ -174,9 +174,9 @@ Hermes 主动跟进 Codex，先自行查证并处理目标、权限和恢复路�
 
 ## 下一步与待决事项
 
-1. 只读核对各 profile 的实际消息来源、用户身份及执行端绑定，再检查首个 Windows 端的版本、网络和已有进程。不从目录名称推断归属。
-2. 在 Windows 通过 stdio 验证 app-server 的会话查询、创建、恢复、事件、追加、停止、问题与审批。恢复测试不得与其他活跃执行者竞争同一会话。
-3. 单独验证原生桌面已有活跃会话的控制入口。若不能实现，记录边界；不将独立受控会话视为桌面接管已经完成。
-4. 完成本机控制服务后，接入 Tailscale 上的 WebSocket 和最小 Hermes 工具，再验证断线恢复、身份隔离与文件交付。
+1. 按运行指南登记实际消息来源、用户身份、项目和执行端，不从 profile 目录名称推断授权。
+2. 在两名真实用户的两台执行电脑上验证路由、会话、项目、恢复和交叉拒绝；目前一台 Windows 实机的结果不能替代此项。
+3. 通过实际微信消息验证输入附件、真人批准和拒绝、原聊天通知及输出附件，并逐项核对真实回执。
+4. 桌面已有活跃会话接管单独验证；当前独立 app-server 会话控制不证明该能力。
 
-方案选用 Python 薄适配、Go 远端与执行端服务、本机 stdio、跨机器 WebSocket 和 SQLite，已初始化代码骨架和开发依赖，业务功能尚未实现。控制服务不要求额外的 Node.js/Python 运行环境，Codex 与项目工具仍需独立准备；Windows 进程清理与各平台分发须实际验证。未安装 HAPI，未创建后台服务，未修改现有 Hermes、SSH 或 Codex 配置。现有双向 SSH 方式属于使用体验上的待改进方案，没有证据表明 SSH 协议本身不可行。当前没有已运行的业务实现，也没有需要隐藏或绕过的失败验收。
+Python 薄适配、Go Hub 与执行端、本机 stdio、跨机器 WebSocket 和 SQLite 均已有实现。真实 Codex、hub-server 跨机器取文件与 Hermes 核验已有运行证据；原聊天发送复用官方函数，实际微信收发和第二台用户电脑仍需现场验收。配置与常驻方法见[运行指南](docs/运行指南.md)，各项证据及边界见[验收记录](docs/验收记录.md)。

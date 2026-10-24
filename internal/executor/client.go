@@ -16,8 +16,10 @@ import (
 
 // Options selects the app-server process. An empty Command uses Codex on PATH.
 type Options struct {
-	Command []string
-	Stderr  io.Writer
+	Command         []string
+	Stderr          io.Writer
+	ExperimentalAPI bool
+	StartupTimeout  time.Duration
 }
 
 // Message is an app-server notification or a request awaiting an explicit response.
@@ -40,23 +42,25 @@ func (e *RPCError) Error() string {
 
 // Client owns one app-server process and its stdio connection.
 type Client struct {
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	stdout    io.ReadCloser
-	decoder   *json.Decoder
-	wait      chan error
-	done      chan struct{}
-	readDone  chan struct{}
-	writeDone chan struct{}
-	mu        sync.Mutex
-	writes    chan writeRequest
-	pending   map[string]chan response
-	requests  map[string]struct{}
-	events    chan Message
-	err       error
-	nextID    int64
-	close     sync.Once
-	closeErr  error
+	cmd        *exec.Cmd
+	process    *processControl
+	stdin      io.WriteCloser
+	stdout     io.ReadCloser
+	decoder    *json.Decoder
+	wait       chan error
+	done       chan struct{}
+	readDone   chan struct{}
+	writeDone  chan struct{}
+	mu         sync.Mutex
+	writes     chan writeRequest
+	pending    map[string]chan response
+	requests   map[string]struct{}
+	events     chan Message
+	err        error
+	nextID     int64
+	close      sync.Once
+	closeErr   error
+	cleanupErr error
 }
 
 type response struct {
@@ -68,6 +72,7 @@ type writeRequest struct {
 	ctx         context.Context
 	data        []byte
 	responseKey string
+	beforeWrite func() error
 	result      chan error
 }
 
@@ -96,12 +101,21 @@ func Start(ctx context.Context, opts Options) (*Client, error) {
 		_ = stdin.Close()
 		return nil, fmt.Errorf("app-server stdout: %w", err)
 	}
-	if err := cmd.Start(); err != nil {
-		_ = stdin.Close()
-		_ = stdout.Close()
-		return nil, fmt.Errorf("start app-server: %w", err)
+	control, err := prepareProcess(cmd)
+	if err != nil {
+		return nil, errors.Join(err, closePipe(stdin), closePipe(stdout))
 	}
-	c := &Client{cmd: cmd, stdin: stdin, stdout: stdout, decoder: json.NewDecoder(stdout), wait: make(chan error, 1), done: make(chan struct{}), readDone: make(chan struct{}), writeDone: make(chan struct{}), writes: make(chan writeRequest), pending: make(map[string]chan response), requests: make(map[string]struct{}), events: make(chan Message, 128)}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start app-server: %w", errors.Join(err, control.close(), closePipe(stdin), closePipe(stdout)))
+	}
+	if err := control.started(cmd); err != nil {
+		killErr := cmd.Process.Kill()
+		if errors.Is(killErr, os.ErrProcessDone) {
+			killErr = nil
+		}
+		return nil, errors.Join(err, killErr, control.close(), closePipe(stdin), closePipe(stdout), cmd.Wait())
+	}
+	c := &Client{cmd: cmd, process: control, stdin: stdin, stdout: stdout, decoder: json.NewDecoder(stdout), wait: make(chan error, 1), done: make(chan struct{}), readDone: make(chan struct{}), writeDone: make(chan struct{}), writes: make(chan writeRequest), pending: make(map[string]chan response), requests: make(map[string]struct{}), events: make(chan Message, 128)}
 	go c.readResponses()
 	go c.writeMessages()
 	go func() {
@@ -115,9 +129,19 @@ func Start(ctx context.Context, opts Options) (*Client, error) {
 		case <-c.done:
 		}
 	}()
-	_, err = c.Call(ctx, "initialize", map[string]any{"clientInfo": map[string]string{"name": "dots_duet_lite", "version": "0.1.0"}})
+	initializeCtx := ctx
+	if opts.StartupTimeout > 0 {
+		var cancel context.CancelFunc
+		initializeCtx, cancel = context.WithTimeout(ctx, opts.StartupTimeout)
+		defer cancel()
+	}
+	initializeParams := map[string]any{"clientInfo": map[string]string{"name": "dots_duet_lite", "version": "0.1.0"}}
+	if opts.ExperimentalAPI {
+		initializeParams["capabilities"] = map[string]bool{"experimentalApi": true}
+	}
+	_, err = c.Call(initializeCtx, "initialize", initializeParams)
 	if err == nil {
-		err = c.write(ctx, map[string]any{"method": "initialized", "params": map[string]any{}}, "")
+		err = c.write(initializeCtx, map[string]any{"method": "initialized", "params": map[string]any{}}, "")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("initialize app-server: %w", errors.Join(err, c.Close()))
@@ -237,6 +261,9 @@ func (c *Client) Events() <-chan Message { return c.events }
 
 // Respond answers one pending server request. It never decides approvals itself.
 func (c *Client) Respond(ctx context.Context, id json.RawMessage, result any) error {
+	return c.respondIf(ctx, id, result, nil)
+}
+func (c *Client) respondIf(ctx context.Context, id json.RawMessage, result any, beforeWrite func() error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -260,7 +287,7 @@ func (c *Client) Respond(ctx context.Context, id json.RawMessage, result any) er
 		return errors.New("app-server request is unknown or already answered")
 	}
 	c.mu.Unlock()
-	err = c.write(ctx, map[string]any{"id": id, "result": json.RawMessage(encoded)}, key)
+	err = c.writeChecked(ctx, map[string]any{"id": id, "result": json.RawMessage(encoded)}, key, beforeWrite)
 	if err != nil {
 		return fmt.Errorf("write app-server response: %w", err)
 	}
@@ -268,11 +295,14 @@ func (c *Client) Respond(ctx context.Context, id json.RawMessage, result any) er
 }
 
 func (c *Client) write(ctx context.Context, message any, responseKey string) error {
+	return c.writeChecked(ctx, message, responseKey, nil)
+}
+func (c *Client) writeChecked(ctx context.Context, message any, responseKey string, beforeWrite func() error) error {
 	data, err := json.Marshal(message)
 	if err != nil {
 		return err
 	}
-	request := writeRequest{ctx: ctx, data: append(data, '\n'), responseKey: responseKey, result: make(chan error, 1)}
+	request := writeRequest{ctx: ctx, data: append(data, '\n'), responseKey: responseKey, beforeWrite: beforeWrite, result: make(chan error, 1)}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -304,6 +334,12 @@ func (c *Client) writeMessages() {
 				request.result <- err
 				continue
 			}
+			if request.beforeWrite != nil {
+				if err := request.beforeWrite(); err != nil {
+					request.result <- err
+					continue
+				}
+			}
 			if request.responseKey != "" {
 				c.mu.Lock()
 				_, pending := c.requests[request.responseKey]
@@ -328,9 +364,20 @@ func (c *Client) writeMessages() {
 
 func (c *Client) abort(err error) {
 	c.fail(err)
-	_ = c.stdin.Close()
-	_ = c.stdout.Close()
-	_ = c.cmd.Process.Kill()
+	cleanupErr := errors.Join(c.process.kill(c.cmd), closePipe(c.stdin), closePipe(c.stdout))
+	if cleanupErr != nil {
+		c.mu.Lock()
+		c.err = errors.Join(c.err, cleanupErr)
+		c.mu.Unlock()
+	}
+}
+
+func closePipe(pipe io.Closer) error {
+	err := pipe.Close()
+	if errors.Is(err, os.ErrClosed) {
+		return nil
+	}
+	return err
 }
 
 func requestKey(id json.RawMessage) (string, error) {
@@ -375,18 +422,26 @@ func (c *Client) Err() error {
 func (c *Client) Close() error {
 	c.close.Do(func() {
 		c.fail(errors.New("app-server client closed"))
-		_ = c.stdin.Close()
+		stdinErr := closePipe(c.stdin)
 		select {
 		case c.closeErr = <-c.wait:
 		case <-time.After(time.Second):
-			c.closeErr = errors.New("app-server did not exit after stdin closed; forced termination required")
-			if err := c.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-				c.closeErr = errors.Join(c.closeErr, err)
-			}
-			_ = c.stdout.Close()
-			c.closeErr = errors.Join(c.closeErr, <-c.wait)
+			c.cleanupErr = errors.Join(errors.New("app-server did not exit after stdin closed; forced termination required"), c.process.kill(c.cmd), closePipe(c.stdout))
+			c.closeErr = <-c.wait
 		}
 		<-c.writeDone
+		c.cleanupErr = errors.Join(c.cleanupErr, stdinErr, c.process.close())
+		c.closeErr = errors.Join(c.closeErr, c.cleanupErr)
 	})
 	return c.closeErr
+}
+
+// A failed process may be replaced only after its owned resources were closed.
+// Its exit status remains observable through Close and Err.
+func (c *Client) closeForRecovery() error {
+	_ = c.Close()
+	if c.cmd.ProcessState == nil || !c.cmd.ProcessState.Exited() {
+		return errors.Join(c.cleanupErr, errors.New("app-server exit was not confirmed"))
+	}
+	return c.cleanupErr
 }
