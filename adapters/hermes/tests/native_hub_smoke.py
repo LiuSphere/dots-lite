@@ -34,13 +34,13 @@ async def smoke(options):
     # A full Hermes gateway performs this startup step. Direct APIServerAdapter
     # embedding must call the same official discovery entry point before admission.
     from tools.mcp_tool_discovery import discover_mcp_tools
-    discovered = await asyncio.to_thread(discover_mcp_tools, ["dots_duet"])
-    if not {"mcp__dots_duet__duet_query", "mcp__dots_duet__duet_record"}.issubset(discovered):
+    discovered = await asyncio.to_thread(discover_mcp_tools, ["dots_lite"])
+    if not {"mcp__dots_lite__dots_lite_query", "mcp__dots_lite__dots_lite_record"}.issubset(discovered):
         raise RuntimeError("Native MCP discovery did not expose the required real tools")
     from model_tools import get_tool_definitions
-    definitions = get_tool_definitions(enabled_toolsets=["dots_duet"], quiet_mode=True)
+    definitions = get_tool_definitions(enabled_toolsets=["dots_lite"], quiet_mode=True)
     available = {tool.get("function", {}).get("name") for tool in definitions}
-    if not {"mcp__dots_duet__duet_query", "mcp__dots_duet__duet_record"}.issubset(available):
+    if not {"mcp__dots_lite__dots_lite_query", "mcp__dots_lite__dots_lite_record"}.issubset(available):
         raise RuntimeError("Native model tool selection omitted the required real tools")
     print(json.dumps({"native_bootstrap_tool_count": len(available)}), flush=True)
     token = (home / "api-token").read_text().strip()
@@ -59,7 +59,7 @@ async def smoke(options):
     def query(name):
         arguments = {"query": name, "task_id": options.task_id}
         reference = hub.request("POST", "/v1/invocations", {
-            "tool": "duet_query", "arguments": arguments,
+            "tool": "dots_lite_query", "arguments": arguments,
             "source": {
                 "kind": "gateway", "platform": "fixture", "sender_id": "sender-native",
                 "chat_id": "chat-native", "session_id": "native-smoke-observer",
@@ -67,7 +67,7 @@ async def smoke(options):
             },
         })
         return hub.request("POST", "/v1/tools/call", {
-            "tool": "duet_query", "arguments": arguments, "context_ref": reference["context_ref"],
+            "tool": "dots_lite_query", "arguments": arguments, "context_ref": reference["context_ref"],
         })
 
     try:
@@ -114,14 +114,14 @@ async def smoke(options):
                     "kind": arguments.get("kind"), "path": arguments.get("path"),
                     "status": arguments.get("status"),
                 })
-                if function.get("name") == "mcp__dots_duet__duet_query" and arguments.get("query") == "text" and arguments.get("path") == options.artifact_path:
+                if function.get("name") == "mcp__dots_lite__dots_lite_query" and arguments.get("query") == "text" and arguments.get("path") == options.artifact_path:
                     text_call_ids.add(call["id"])
-                if function.get("name") == "mcp__dots_duet__duet_record" and arguments.get("kind") == "verification" and arguments.get("status") == "passed":
+                if function.get("name") == "mcp__dots_lite__dots_lite_record" and arguments.get("kind") == "verification" and arguments.get("status") == "passed":
                     verification_evidence.append(arguments.get("evidence", {}))
-        queries = {call["query"] for call in calls if call["name"] == "mcp__dots_duet__duet_query"}
+        queries = {call["query"] for call in calls if call["name"] == "mcp__dots_lite__dots_lite_query"}
         if not {"session", "goal"}.issubset(queries):
             raise RuntimeError("Native transcript does not prove both session and Goal queries: " + json.dumps(calls))
-        if not any(c["name"] == "mcp__dots_duet__duet_record" and c["kind"] == "followup" for c in calls):
+        if not any(c["name"] == "mcp__dots_lite__dots_lite_record" and c["kind"] == "followup" for c in calls):
             raise RuntimeError("Native transcript has no actual followup evidence record")
         if not any(message.get("role") == "tool" and message.get("tool_call_id") in text_call_ids and options.expected_marker in str(message.get("content", "")) for message in messages["data"]):
             raise RuntimeError("Native transcript does not prove Hermes actually read the declared marker file")

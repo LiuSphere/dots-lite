@@ -28,7 +28,7 @@ func TestFolderCreateKeepsWorkingDirectoryAndOriginalInvocation(t *testing.T) {
 	}
 	defer h.Close()
 	args := `{"action":"task.create","folder_id":"demo","working_directory":"reports/monthly","input":"write report"}`
-	prepared := call(t, h, 1001, "duet_prepare", args)
+	prepared := call(t, h, 1001, "dots_lite_prepare", args)
 	var ids struct {
 		TaskID      string `json:"task_id"`
 		OperationID string `json:"operation_id"`
@@ -41,7 +41,7 @@ func TestFolderCreateKeepsWorkingDirectoryAndOriginalInvocation(t *testing.T) {
 		`{"query":"operation","operation_id":"` + ids.OperationID + `"}`,
 	} {
 		var got map[string]any
-		if err := json.Unmarshal(call(t, h, 1001, "duet_query", query), &got); err != nil {
+		if err := json.Unmarshal(call(t, h, 1001, "dots_lite_query", query), &got); err != nil {
 			t.Fatal(err)
 		}
 		if got["folder_id"] != "demo" || got["working_directory"] != "reports/monthly" {
@@ -64,7 +64,7 @@ func TestFolderQueriesListOnlyAuthorizedFolders(t *testing.T) {
 	connectFolderExecutor(t, h)
 	for _, query := range []string{"folders", "projects"} {
 		var folders []protocol.Project
-		if err := json.Unmarshal(call(t, h, 1001, "duet_query", `{"query":"`+query+`"}`), &folders); err != nil {
+		if err := json.Unmarshal(call(t, h, 1001, "dots_lite_query", `{"query":"`+query+`"}`), &folders); err != nil {
 			t.Fatal(err)
 		}
 		if len(folders) != 1 || folders[0].ID != "demo" {
@@ -76,7 +76,7 @@ func TestFolderQueriesListOnlyAuthorizedFolders(t *testing.T) {
 			Folders []protocol.Project `json:"folders"`
 		} `json:"snapshot"`
 	}
-	if err := json.Unmarshal(call(t, h, 1001, "duet_query", `{"query":"machine"}`), &machine); err != nil {
+	if err := json.Unmarshal(call(t, h, 1001, "dots_lite_query", `{"query":"machine"}`), &machine); err != nil {
 		t.Fatal(err)
 	}
 	if len(machine.Snapshot.Folders) != 1 || machine.Snapshot.Folders[0].ID != "demo" {
@@ -124,7 +124,7 @@ func TestFolderDirectoryBrowseRequiresExplicitAuthorizedFolder(t *testing.T) {
 		`{"query":"text","folder_id":"demo","path":"private.txt"}`,
 		`{"query":"download","folder_id":"demo","path":"private.txt"}`,
 	} {
-		if _, err := h.Call(ctx, 1001, registered(t, h, 1001, "duet_query", args)); err == nil {
+		if _, err := h.Call(ctx, 1001, registered(t, h, 1001, "dots_lite_query", args)); err == nil {
 			t.Fatalf("unbound or unauthorized file query was accepted: %s", args)
 		}
 	}
@@ -138,7 +138,7 @@ func TestFolderDirectoryBrowseRequiresExplicitAuthorizedFolder(t *testing.T) {
 		seen <- *frame.Operation
 		_ = wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "result", ID: frame.ID, Result: &protocol.Result{OperationID: frame.Operation.ID, Stage: "accepted", Data: want}})
 	}()
-	got := call(t, h, 1001, "duet_query", `{"query":"directory","folder_id":"demo","path":"."}`)
+	got := call(t, h, 1001, "dots_lite_query", `{"query":"directory","folder_id":"demo","path":"."}`)
 	if string(got) != string(want) {
 		t.Fatalf("directory result = %s", got)
 	}
@@ -167,26 +167,26 @@ func TestFolderStopKeepsDirectoryAndInvalidatesPreparedVersion(t *testing.T) {
 		TaskID      string `json:"task_id"`
 		OperationID string `json:"operation_id"`
 	}
-	if err := json.Unmarshal(call(t, h, 1001, "duet_prepare", `{"action":"task.create","folder_id":"demo","working_directory":"nested","input":"work"}`), &created); err != nil {
+	if err := json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","working_directory":"nested","input":"work"}`), &created); err != nil {
 		t.Fatal(err)
 	}
 	var stopped struct {
 		OperationID string `json:"operation_id"`
 	}
-	if err := json.Unmarshal(call(t, h, 1001, "duet_stop", `{"task_id":"`+created.TaskID+`"}`), &stopped); err != nil {
+	if err := json.Unmarshal(call(t, h, 1001, "dots_lite_stop", `{"task_id":"`+created.TaskID+`"}`), &stopped); err != nil {
 		t.Fatal(err)
 	}
 	var op struct {
 		WorkingDirectory string `json:"working_directory"`
 		TaskVersion      int64  `json:"task_version"`
 	}
-	if err := json.Unmarshal(call(t, h, 1001, "duet_query", `{"query":"operation","operation_id":"`+stopped.OperationID+`"}`), &op); err != nil {
+	if err := json.Unmarshal(call(t, h, 1001, "dots_lite_query", `{"query":"operation","operation_id":"`+stopped.OperationID+`"}`), &op); err != nil {
 		t.Fatal(err)
 	}
 	if op.WorkingDirectory != "nested" || op.TaskVersion != 2 {
 		t.Fatalf("stop lost its directory or version: %+v", op)
 	}
-	if _, err := h.Call(context.Background(), 1001, registered(t, h, 1001, "duet_submit", `{"operation_id":"`+created.OperationID+`"}`)); err == nil {
+	if _, err := h.Call(context.Background(), 1001, registered(t, h, 1001, "dots_lite_submit", `{"operation_id":"`+created.OperationID+`"}`)); err == nil {
 		t.Fatal("prepared create survived the pause version change")
 	}
 }
@@ -202,7 +202,7 @@ func TestFolderDirectoryAndInvocationStayFixedAcrossRetriesAndRestart(t *testing
 		t.Fatal(err)
 	}
 	defer h.Close()
-	request := registered(t, h, 1001, "duet_prepare", `{"action":"task.create","folder_id":"demo","working_directory":"nested","input":"work"}`)
+	request := registered(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","working_directory":"nested","input":"work"}`)
 	first, err := h.Call(context.Background(), 1001, request)
 	if err != nil {
 		t.Fatal(err)
@@ -225,14 +225,14 @@ func TestFolderDirectoryAndInvocationStayFixedAcrossRetriesAndRestart(t *testing
 	}
 	for _, directory := range []string{"other", ".", "..", "nested/..", "/outside", `C:\outside`, `nested\child`, "nested//child", "nested/./child", "nested/", "volume:child"} {
 		args, _ := json.Marshal(map[string]string{"action": "task.continue", "task_id": created.TaskID, "working_directory": directory, "input": "continue"})
-		if _, err := h.Call(context.Background(), 1001, registered(t, h, 1001, "duet_prepare", string(args))); err == nil {
+		if _, err := h.Call(context.Background(), 1001, registered(t, h, 1001, "dots_lite_prepare", string(args))); err == nil {
 			t.Fatalf("task directory changed or escaped: %q", directory)
 		}
 	}
 	for _, fields := range []string{``, `,"working_directory":"nested"`, `,"folder_id":"demo","project_id":"demo","working_directory":"nested"`} {
-		call(t, h, 1001, "duet_prepare", `{"action":"task.continue","task_id":"`+created.TaskID+`","input":"continue"`+fields+`}`)
+		call(t, h, 1001, "dots_lite_prepare", `{"action":"task.continue","task_id":"`+created.TaskID+`","input":"continue"`+fields+`}`)
 	}
-	if _, err := h.Call(context.Background(), 1001, registered(t, h, 1001, "duet_prepare", `{"action":"task.create","folder_id":"demo","project_id":"other","input":"work"}`)); err == nil {
+	if _, err := h.Call(context.Background(), 1001, registered(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","project_id":"other","input":"work"}`)); err == nil {
 		t.Fatal("conflicting folder aliases were accepted")
 	}
 	if err := h.Close(); err != nil {
@@ -248,7 +248,7 @@ func TestFolderDirectoryAndInvocationStayFixedAcrossRetriesAndRestart(t *testing
 		`{"query":"operation","operation_id":"` + created.OperationID + `"}`,
 	} {
 		var got map[string]any
-		if err := json.Unmarshal(call(t, h, 1001, "duet_query", query), &got); err != nil {
+		if err := json.Unmarshal(call(t, h, 1001, "dots_lite_query", query), &got); err != nil {
 			t.Fatal(err)
 		}
 		if got["working_directory"] != "nested" {
@@ -258,13 +258,13 @@ func TestFolderDirectoryAndInvocationStayFixedAcrossRetriesAndRestart(t *testing
 	var rootTask struct {
 		TaskID string `json:"task_id"`
 	}
-	if err := json.Unmarshal(call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","input":"legacy root task"}`), &rootTask); err != nil {
+	if err := json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"legacy root task"}`), &rootTask); err != nil {
 		t.Fatal(err)
 	}
 	var root struct {
 		WorkingDirectory string `json:"working_directory"`
 	}
-	if err := json.Unmarshal(call(t, h, 1001, "duet_query", `{"query":"task","task_id":"`+rootTask.TaskID+`"}`), &root); err != nil || root.WorkingDirectory != "." {
+	if err := json.Unmarshal(call(t, h, 1001, "dots_lite_query", `{"query":"task","task_id":"`+rootTask.TaskID+`"}`), &root); err != nil || root.WorkingDirectory != "." {
 		t.Fatalf("omitted directory did not select the folder root: %+v, %v", root, err)
 	}
 }
@@ -282,13 +282,13 @@ func TestFolderCreateRejectsOutsideOrUncleanDirectory(t *testing.T) {
 	defer h.Close()
 	for _, directory := range []string{"..", "child/../other", "/outside", `C:/outside`, `child\other`, "child//other", "child/./other", "child/", "volume:child"} {
 		args, _ := json.Marshal(map[string]string{"action": "task.create", "folder_id": "demo", "working_directory": directory, "input": "work"})
-		if _, err := h.Call(context.Background(), 1001, registered(t, h, 1001, "duet_prepare", string(args))); err == nil {
+		if _, err := h.Call(context.Background(), 1001, registered(t, h, 1001, "dots_lite_prepare", string(args))); err == nil {
 			t.Fatalf("outside or unclean creation directory was accepted: %q", directory)
 		}
 	}
 	for _, directory := range []string{".", "child", "child/other"} {
 		args, _ := json.Marshal(map[string]string{"action": "task.create", "folder_id": "demo", "working_directory": directory, "input": "work"})
-		call(t, h, 1001, "duet_prepare", string(args))
+		call(t, h, 1001, "dots_lite_prepare", string(args))
 	}
 }
 
@@ -316,7 +316,7 @@ func TestFolderBindingAliasAuthorizesCreateAndRejectsCombinedLists(t *testing.T)
 				t.Fatal(err)
 			}
 			defer h.Close()
-			call(t, h, 1001, "duet_prepare", `{"action":"task.create","folder_id":"demo","input":"work"}`)
+			call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"work"}`)
 			if err := h.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -325,7 +325,7 @@ func TestFolderBindingAliasAuthorizesCreateAndRejectsCombinedLists(t *testing.T)
 				t.Fatalf("reusing the same authorized-folder configuration failed: %v", err)
 			}
 			defer restarted.Close()
-			call(t, restarted, 1001, "duet_prepare", `{"action":"task.create","folder_id":"demo","input":"work after restart"}`)
+			call(t, restarted, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"work after restart"}`)
 		})
 	}
 }

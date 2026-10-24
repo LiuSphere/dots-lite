@@ -33,12 +33,12 @@ def create_server():
 
     async def call_tool(context, params):
         if params.name not in TOOL_SCHEMAS:
-            return error_result("Unknown duet tool")
+            return error_result("Unknown dots-lite tool")
         arguments = dict(params.arguments or {})
         try:
             validate(arguments, TOOL_SCHEMAS[params.name])
         except ValidationError as error:
-            return error_result("Invalid duet arguments: " + error.message)
+            return error_result("Invalid dots-lite arguments: " + error.message)
         context_ref = arguments.pop("_context_ref", "")
         if not context_ref:
             return error_result("Missing trusted context reference; the Hermes source plugin is required")
@@ -47,17 +47,17 @@ def create_server():
             result = await anyio.to_thread.run_sync(partial(hub.request, "POST", "/v1/tools/call", {
                 "tool": params.name, "arguments": arguments, "context_ref": context_ref,
             }))
-            if params.name == "duet_approve":
+            if params.name == "dots_lite_approve":
                 async with approval_lock:
                     result = await confirm_approval(context, hub, result, arguments, context_ref)
-            if params.name == "duet_query" and arguments.get("query") == "download":
+            if params.name == "dots_lite_query" and arguments.get("query") == "download":
                 result = await anyio.to_thread.run_sync(materialize_download, result)
         except (HubError, ValueError, OSError) as error:
             return error_result(str(error))
         return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False))])
 
     return Server(
-        "dots-lite", version="0.1.0",
+        "dots-lite", version="0.2.0",
         on_list_tools=list_tools, on_call_tool=call_tool,
     )
 
@@ -85,7 +85,7 @@ async def confirm_approval(context, hub, result, arguments, context_ref):
     if answer.action not in {"accept", "decline"}:
         raise HubError("Unsupported human confirmation result; the request remains pending")
     return await anyio.to_thread.run_sync(partial(hub.request, "POST", "/v1/approvals/confirm", {
-        "tool": "duet_approve", "arguments": arguments, "context_ref": context_ref,
+        "tool": "dots_lite_approve", "arguments": arguments, "context_ref": context_ref,
         "request_id": approval["request_id"], "instance_id": approval["instance_id"],
         "decision": answer.action,
     }))

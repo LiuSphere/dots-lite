@@ -29,10 +29,10 @@ func TestToolCallsRequireRegisteredMatchingSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := json.RawMessage(`{"query":"machine"}`)
-	if _, err := h.Call(context.Background(), 1001, protocol.ToolRequest{Tool: "duet_query", Arguments: args, ContextRef: "invented"}); err == nil {
+	if _, err := h.Call(context.Background(), 1001, protocol.ToolRequest{Tool: "dots_lite_query", Arguments: args, ContextRef: "invented"}); err == nil {
 		t.Fatal("unregistered model context was accepted")
 	}
-	inv := protocol.Invocation{Tool: "duet_query", Arguments: args, Source: protocol.Source{Kind: "gateway", Platform: "test", SenderID: "sender-a", ChatID: "chat-a", SessionID: "session-a"}}
+	inv := protocol.Invocation{Tool: "dots_lite_query", Arguments: args, Source: protocol.Source{Kind: "gateway", Platform: "test", SenderID: "sender-a", ChatID: "chat-a", SessionID: "session-a"}}
 	ref, err := h.RegisterInvocation(context.Background(), 1001, inv)
 	if err != nil {
 		t.Fatal(err)
@@ -82,14 +82,14 @@ func TestInvocationParametersPreserveLargeIntegersAndRejectTrailingJSON(t *testi
 		t.Fatal(err)
 	}
 	source := protocol.Source{Kind: "gateway", Platform: "test", SenderID: "sender-a", ChatID: "chat-a", SessionID: "session-a"}
-	if _, err = h.RegisterInvocation(context.Background(), 1001, protocol.Invocation{Tool: "duet_query", Arguments: json.RawMessage(`{"query":"machine"} {"query":"tasks"}`), Source: source}); err == nil {
+	if _, err = h.RegisterInvocation(context.Background(), 1001, protocol.Invocation{Tool: "dots_lite_query", Arguments: json.RawMessage(`{"query":"machine"} {"query":"tasks"}`), Source: source}); err == nil {
 		t.Fatal("trailing JSON was accepted")
 	}
-	ref, err := h.RegisterInvocation(context.Background(), 1001, protocol.Invocation{Tool: "duet_query", Arguments: json.RawMessage(`{"query":"machine","offset":9007199254740992}`), Source: source})
+	ref, err := h.RegisterInvocation(context.Background(), 1001, protocol.Invocation{Tool: "dots_lite_query", Arguments: json.RawMessage(`{"query":"machine","offset":9007199254740992}`), Source: source})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = h.Call(context.Background(), 1001, protocol.ToolRequest{Tool: "duet_query", Arguments: json.RawMessage(`{"query":"machine","offset":9007199254740993}`), ContextRef: ref})
+	_, err = h.Call(context.Background(), 1001, protocol.ToolRequest{Tool: "dots_lite_query", Arguments: json.RawMessage(`{"query":"machine","offset":9007199254740993}`), ContextRef: ref})
 	if err == nil {
 		t.Fatal("changed integer bypassed exact invocation binding")
 	}
@@ -105,7 +105,7 @@ func TestHTTPIdentityCannotBeSuppliedByHeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := httptest.NewRequest(http.MethodPost, "/v1/invocations", strings.NewReader(`{"tool":"duet_query","arguments":{"query":"machine"},"source":{"kind":"gateway","platform":"test","sender_id":"sender-a","chat_id":"chat-a","session_id":"session-a"}}`))
+	r := httptest.NewRequest(http.MethodPost, "/v1/invocations", strings.NewReader(`{"tool":"dots_lite_query","arguments":{"query":"machine"},"source":{"kind":"gateway","platform":"test","sender_id":"sender-a","chat_id":"chat-a","session_id":"session-a"}}`))
 	r.Header.Set("X-UID", "1001")
 	w := httptest.NewRecorder()
 	h.APIHandler().ServeHTTP(w, r)
@@ -124,14 +124,14 @@ func TestOfflineStopPersistsPauseAndInvalidatesPreparedWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared := call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","input":"make report"}`)
+	prepared := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"make report"}`)
 	var ids struct {
 		TaskID      string `json:"task_id"`
 		OperationID string `json:"operation_id"`
 	}
 	_ = json.Unmarshal(prepared, &ids)
-	staleRecord := registered(t, h, 1001, "duet_record", `{"task_id":"`+ids.TaskID+`","kind":"verification","status":"passed","evidence":{"checks":[{"observed":"old result"}]}}`)
-	stopped := call(t, h, 1001, "duet_stop", `{"task_id":"`+ids.TaskID+`"}`)
+	staleRecord := registered(t, h, 1001, "dots_lite_record", `{"task_id":"`+ids.TaskID+`","kind":"verification","status":"passed","evidence":{"checks":[{"observed":"old result"}]}}`)
+	stopped := call(t, h, 1001, "dots_lite_stop", `{"task_id":"`+ids.TaskID+`"}`)
 	var stop struct {
 		PauseRecorded bool `json:"pause_recorded"`
 		StopConfirmed bool `json:"stop_confirmed"`
@@ -140,20 +140,20 @@ func TestOfflineStopPersistsPauseAndInvalidatesPreparedWrites(t *testing.T) {
 	if !stop.PauseRecorded || stop.StopConfirmed {
 		t.Fatalf("offline stop facts incorrect: %s", stopped)
 	}
-	taskJSON := call(t, h, 1001, "duet_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
+	taskJSON := call(t, h, 1001, "dots_lite_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
 	var task protocol.Task
 	_ = json.Unmarshal(taskJSON, &task)
 	if !task.Paused || task.Version != 2 || task.Execution != "pause_requested" {
 		t.Fatalf("pause not durable: %s", taskJSON)
 	}
-	_, err = h.Call(context.Background(), 1001, registered(t, h, 1001, "duet_submit", `{"operation_id":"`+ids.OperationID+`"}`))
+	_, err = h.Call(context.Background(), 1001, registered(t, h, 1001, "dots_lite_submit", `{"operation_id":"`+ids.OperationID+`"}`))
 	if err == nil {
 		t.Fatal("old version write was accepted after stop")
 	}
 	if _, err = h.Call(context.Background(), 1001, staleRecord); err == nil {
 		t.Fatal("gateway reference from before stop recorded stale verification")
 	}
-	call(t, h, 1001, "duet_record", `{"task_id":"`+ids.TaskID+`","kind":"verification","status":"pending","evidence":{"reason":"inspect paused task"}}`)
+	call(t, h, 1001, "dots_lite_record", `{"task_id":"`+ids.TaskID+`","kind":"verification","status":"pending","evidence":{"reason":"inspect paused task"}}`)
 }
 
 func TestEmptyResultEvidenceCannotMarkVerificationOrDeliveryComplete(t *testing.T) {
@@ -166,19 +166,19 @@ func TestEmptyResultEvidenceCannotMarkVerificationOrDeliveryComplete(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared := call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","input":"make report"}`)
+	prepared := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"make report"}`)
 	var ids struct {
 		TaskID string `json:"task_id"`
 	}
 	_ = json.Unmarshal(prepared, &ids)
 	for _, body := range []string{`"kind":"verification","status":"passed","evidence":{"checks":[null]}`, `"kind":"delivery","status":"delivered","evidence":{"receipt":null}`} {
 		raw := `{"task_id":"` + ids.TaskID + `",` + body + `}`
-		if _, err = h.Call(context.Background(), 1001, registered(t, h, 1001, "duet_record", raw)); err == nil {
+		if _, err = h.Call(context.Background(), 1001, registered(t, h, 1001, "dots_lite_record", raw)); err == nil {
 			t.Fatalf("empty result evidence accepted: %s", raw)
 		}
 	}
 	valid := `{"task_id":"` + ids.TaskID + `","kind":"verification","status":"passed","evidence":{"checks":[{"command":"go test","exit_code":0,"output_ref":"observed-test-output"}]}}`
-	if _, err = h.Call(context.Background(), 1001, registered(t, h, 1001, "duet_record", valid)); err != nil {
+	if _, err = h.Call(context.Background(), 1001, registered(t, h, 1001, "dots_lite_record", valid)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -225,7 +225,7 @@ func TestStopConfirmationUsesVersionedNativePauseReceipt(t *testing.T) {
 			var ids struct {
 				TaskID string `json:"task_id"`
 			}
-			if err = json.Unmarshal(call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","input":"finish then pause"}`), &ids); err != nil {
+			if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"finish then pause"}`), &ids); err != nil {
 				t.Fatal(err)
 			}
 			done := make(chan error, 1)
@@ -238,7 +238,7 @@ func TestStopConfirmationUsesVersionedNativePauseReceipt(t *testing.T) {
 				native, _ := json.Marshal(protocol.Task{ID: ids.TaskID, Scope: protocol.Scope{UserID: "a", ProfileID: "a", ExecutorID: "pc-a"}, Version: tc.version, Paused: tc.paused, Execution: tc.execution})
 				done <- wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "result", ID: frame.ID, Result: &protocol.Result{OperationID: frame.Operation.ID, TaskID: ids.TaskID, Stage: "accepted", Data: native}})
 			}()
-			stopped := call(t, h, 1001, "duet_stop", `{"task_id":"`+ids.TaskID+`"}`)
+			stopped := call(t, h, 1001, "dots_lite_stop", `{"task_id":"`+ids.TaskID+`"}`)
 			if err = <-done; err != nil {
 				t.Fatal(err)
 			}
@@ -281,7 +281,7 @@ func TestTerminalEventBeforeReceiptDoesNotRegressTaskToRunning(t *testing.T) {
 	if err = wsjson.Read(ctx, conn, &ack); err != nil {
 		t.Fatal(err)
 	}
-	prepared := call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","input":"fast task"}`)
+	prepared := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"fast task"}`)
 	var ids struct {
 		TaskID      string `json:"task_id"`
 		OperationID string `json:"operation_id"`
@@ -306,11 +306,11 @@ func TestTerminalEventBeforeReceiptDoesNotRegressTaskToRunning(t *testing.T) {
 		data, _ := json.Marshal(protocol.Task{ID: ids.TaskID, Scope: protocol.Scope{UserID: "a", ProfileID: "a", ExecutorID: "pc-a"}, ThreadID: "fast-thread", TurnID: "fast-turn", Execution: "running", Version: 1})
 		done <- wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "result", ID: operation.ID, Result: &protocol.Result{OperationID: ids.OperationID, TaskID: ids.TaskID, Stage: "accepted", ThreadID: "fast-thread", TurnID: "fast-turn", Data: data}})
 	}()
-	call(t, h, 1001, "duet_submit", `{"operation_id":"`+ids.OperationID+`"}`)
+	call(t, h, 1001, "dots_lite_submit", `{"operation_id":"`+ids.OperationID+`"}`)
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	taskJSON := call(t, h, 1001, "duet_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
+	taskJSON := call(t, h, 1001, "dots_lite_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
 	var task protocol.Task
 	_ = json.Unmarshal(taskJSON, &task)
 	if task.Execution != "completed" || task.ThreadID != "fast-thread" || task.TurnID != "fast-turn" {
@@ -325,7 +325,7 @@ func TestTerminalEventBeforeReceiptDoesNotRegressTaskToRunning(t *testing.T) {
 	if err = wsjson.Read(ctx, conn, &ack); err != nil {
 		t.Fatal(err)
 	}
-	taskJSON = call(t, h, 1001, "duet_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
+	taskJSON = call(t, h, 1001, "dots_lite_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
 	if err = json.Unmarshal(taskJSON, &task); err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +360,7 @@ func TestAutomaticArtifactTransferRequiresMatchingScopeAndReceipt(t *testing.T) 
 	if err = wsjson.Read(ctx, conn, &ack); err != nil {
 		t.Fatal(err)
 	}
-	prepared := call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","input":"make report","artifacts":["out.txt"]}`)
+	prepared := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"make report","artifacts":["out.txt"]}`)
 	var ids struct {
 		TaskID string `json:"task_id"`
 	}
@@ -403,7 +403,7 @@ func TestAutomaticArtifactTransferRequiresMatchingScopeAndReceipt(t *testing.T) 
 	if err != nil || string(first) != string(second) {
 		t.Fatalf("acquisition receipt not idempotent: %s %s %v", first, second, err)
 	}
-	taskJSON := call(t, h, 1001, "duet_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
+	taskJSON := call(t, h, 1001, "dots_lite_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
 	var task protocol.Task
 	_ = json.Unmarshal(taskJSON, &task)
 	if task.Delivery != "acquired" {
@@ -416,21 +416,21 @@ func TestAutomaticArtifactTransferRequiresMatchingScopeAndReceipt(t *testing.T) 
 			_ = wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "result", ID: stop.ID, Result: &protocol.Result{OperationID: stop.Operation.ID, TaskID: ids.TaskID, Stage: "accepted"}})
 		}
 	}()
-	call(t, h, 1001, "duet_stop", `{"task_id":"`+ids.TaskID+`"}`)
+	call(t, h, 1001, "dots_lite_stop", `{"task_id":"`+ids.TaskID+`"}`)
 	if err = wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "event", Event: &protocol.Event{Sequence: 2, TaskID: ids.TaskID, InstanceID: "artifact-instance", Type: "artifact/available", Data: file, CreatedAt: time.Now()}}); err != nil {
 		t.Fatal(err)
 	}
 	if err = wsjson.Read(ctx, conn, &ack); err != nil {
 		t.Fatal(err)
 	}
-	taskJSON = call(t, h, 1001, "duet_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
+	taskJSON = call(t, h, 1001, "dots_lite_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
 	if err = json.Unmarshal(taskJSON, &task); err != nil {
 		t.Fatal(err)
 	}
 	if task.Delivery != "acquired" {
 		t.Fatalf("old artifact changed current delivery: %s", taskJSON)
 	}
-	continued := call(t, h, 1001, "duet_prepare", `{"action":"task.continue","task_id":"`+ids.TaskID+`","input":"resume authorized task"}`)
+	continued := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.continue","task_id":"`+ids.TaskID+`","input":"resume authorized task"}`)
 	var next struct {
 		OperationID string `json:"operation_id"`
 	}
@@ -448,8 +448,8 @@ func TestAutomaticArtifactTransferRequiresMatchingScopeAndReceipt(t *testing.T) 
 		data, _ := json.Marshal(protocol.Task{ID: ids.TaskID, Scope: protocol.Scope{UserID: "a", ProfileID: "a", ExecutorID: "pc-a"}, Version: continuation.Operation.TaskVersion, Execution: "running", ThreadID: "thread-a", TurnID: "turn-b"})
 		_ = wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "result", ID: continuation.ID, Result: &protocol.Result{OperationID: continuation.Operation.ID, TaskID: ids.TaskID, Stage: "accepted", ThreadID: "thread-a", TurnID: "turn-b", Data: data}})
 	}()
-	call(t, h, 1001, "duet_submit", `{"operation_id":"`+next.OperationID+`"}`)
-	taskJSON = call(t, h, 1001, "duet_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
+	call(t, h, 1001, "dots_lite_submit", `{"operation_id":"`+next.OperationID+`"}`)
+	taskJSON = call(t, h, 1001, "dots_lite_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
 	if err = json.Unmarshal(taskJSON, &task); err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +471,7 @@ func TestPreparedTaskSurvivesRestartAndStaysInsideItsScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created := call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","input":"write a report","name":"report"}`)
+	created := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"write a report","name":"report"}`)
 	var prepared struct {
 		TaskID      string `json:"task_id"`
 		OperationID string `json:"operation_id"`
@@ -495,7 +495,7 @@ func TestPreparedTaskSurvivesRestartAndStaysInsideItsScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task := call(t, h, 1001, "duet_query", `{"query":"task","task_id":"`+prepared.TaskID+`"}`)
+	task := call(t, h, 1001, "dots_lite_query", `{"query":"task","task_id":"`+prepared.TaskID+`"}`)
 	var recovered protocol.Task
 	if err := json.Unmarshal(task, &recovered); err != nil {
 		t.Fatal(err)
@@ -503,7 +503,7 @@ func TestPreparedTaskSurvivesRestartAndStaysInsideItsScope(t *testing.T) {
 	if recovered.Objective != "write a report" || recovered.Execution != "prepared" || recovered.Verification != "pending" || recovered.Delivery != "pending" {
 		t.Fatalf("task changed after restart: %s", task)
 	}
-	op := call(t, h, 1001, "duet_query", `{"query":"operation","operation_id":"`+prepared.OperationID+`"}`)
+	op := call(t, h, 1001, "dots_lite_query", `{"query":"operation","operation_id":"`+prepared.OperationID+`"}`)
 	var operation struct {
 		Stage string `json:"stage"`
 	}
@@ -511,7 +511,7 @@ func TestPreparedTaskSurvivesRestartAndStaysInsideItsScope(t *testing.T) {
 	if operation.Stage != "prepared" {
 		t.Fatalf("operation lost: %s", op)
 	}
-	req := registered(t, h, 1002, "duet_query", `{"query":"task","task_id":"`+prepared.TaskID+`"}`)
+	req := registered(t, h, 1002, "dots_lite_query", `{"query":"task","task_id":"`+prepared.TaskID+`"}`)
 	if _, err = h.Call(ctx, 1002, req); err == nil {
 		t.Fatal("other scope read task")
 	}
@@ -548,7 +548,7 @@ func TestEventReplayIsIdempotentButGapsAndChangedContentAreRejected(t *testing.T
 			var ids struct {
 				TaskID string `json:"task_id"`
 			}
-			if err = json.Unmarshal(call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","input":"inspect events"}`), &ids); err != nil {
+			if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"inspect events"}`), &ids); err != nil {
 				t.Fatal(err)
 			}
 			event := protocol.Event{Sequence: 1, TaskID: ids.TaskID, InstanceID: "event-instance", Type: "turn/completed", Data: json.RawMessage(`{"turn":{"id":"turn-a","status":"completed"}}`), CreatedAt: time.Now()}
@@ -572,7 +572,7 @@ func TestEventReplayIsIdempotentButGapsAndChangedContentAreRejected(t *testing.T
 				t.Fatalf("invalid event acknowledged: %+v", ack)
 			}
 			var task protocol.Task
-			if err = json.Unmarshal(call(t, h, 1001, "duet_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`), &task); err != nil {
+			if err = json.Unmarshal(call(t, h, 1001, "dots_lite_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`), &task); err != nil {
 				t.Fatal(err)
 			}
 			if task.Execution != "completed" {
@@ -595,7 +595,7 @@ func TestUploadUsesPreparedTaskScopeAndRejectsChangedContent(t *testing.T) {
 	var ids struct {
 		TaskID string `json:"task_id"`
 	}
-	if err = json.Unmarshal(call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","input":"read attachment"}`), &ids); err != nil {
+	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"read attachment"}`), &ids); err != nil {
 		t.Fatal(err)
 	}
 	valid := `{"action":"files.upload","task_id":"` + ids.TaskID + `","upload":{"name":"input.txt","data_base64":"YWJj","size":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}}`
@@ -605,26 +605,26 @@ func TestUploadUsesPreparedTaskScopeAndRejectsChangedContent(t *testing.T) {
 		strings.Replace(valid, `"size":3`, `"size":4`, 1),
 		strings.Replace(valid, `"YWJj"`, `"YWJk"`, 1),
 	} {
-		if _, err = h.Call(context.Background(), 1001, registered(t, h, 1001, "duet_prepare", invalid)); err == nil {
+		if _, err = h.Call(context.Background(), 1001, registered(t, h, 1001, "dots_lite_prepare", invalid)); err == nil {
 			t.Fatalf("invalid upload prepared: %s", invalid)
 		}
 	}
-	prepared := call(t, h, 1001, "duet_prepare", valid)
+	prepared := call(t, h, 1001, "dots_lite_prepare", valid)
 	var upload struct {
 		OperationID string `json:"operation_id"`
 	}
 	if err = json.Unmarshal(prepared, &upload); err != nil {
 		t.Fatal(err)
 	}
-	read := call(t, h, 1001, "duet_query", `{"query":"operation","operation_id":"`+upload.OperationID+`"}`)
+	read := call(t, h, 1001, "dots_lite_query", `{"query":"operation","operation_id":"`+upload.OperationID+`"}`)
 	if strings.Contains(string(read), `"data_base64"`) || !strings.Contains(string(read), `"size":3`) || !strings.Contains(string(read), `"stage":"prepared"`) {
 		t.Fatalf("public upload operation did not preserve metadata without bytes: %s", read)
 	}
-	if _, err = h.Call(context.Background(), 1002, registered(t, h, 1002, "duet_query", `{"query":"operation","operation_id":"`+upload.OperationID+`"}`)); err == nil {
+	if _, err = h.Call(context.Background(), 1002, registered(t, h, 1002, "dots_lite_query", `{"query":"operation","operation_id":"`+upload.OperationID+`"}`)); err == nil {
 		t.Fatal("other scope read prepared attachment")
 	}
-	call(t, h, 1001, "duet_stop", `{"task_id":"`+ids.TaskID+`"}`)
-	if _, err = h.Call(context.Background(), 1001, registered(t, h, 1001, "duet_submit", `{"operation_id":"`+upload.OperationID+`"}`)); err == nil {
+	call(t, h, 1001, "dots_lite_stop", `{"task_id":"`+ids.TaskID+`"}`)
+	if _, err = h.Call(context.Background(), 1001, registered(t, h, 1001, "dots_lite_submit", `{"operation_id":"`+upload.OperationID+`"}`)); err == nil {
 		t.Fatal("old upload submitted after stop")
 	}
 }
@@ -659,7 +659,7 @@ func TestReconcileFindsMissingTerminalEventWithoutReplayingWrite(t *testing.T) {
 		TaskID      string `json:"task_id"`
 		OperationID string `json:"operation_id"`
 	}
-	if err = json.Unmarshal(call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","input":"finish report"}`), &ids); err != nil {
+	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"finish report"}`), &ids); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
@@ -692,12 +692,12 @@ func TestReconcileFindsMissingTerminalEventWithoutReplayingWrite(t *testing.T) {
 		}
 		done <- nil
 	}()
-	call(t, h, 1001, "duet_submit", `{"operation_id":"`+ids.OperationID+`"}`)
+	call(t, h, 1001, "dots_lite_submit", `{"operation_id":"`+ids.OperationID+`"}`)
 	if err = h.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
 	var task protocol.Task
-	if err = json.Unmarshal(call(t, h, 1001, "duet_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`), &task); err != nil {
+	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`), &task); err != nil {
 		t.Fatal(err)
 	}
 	if task.Execution != "completed" {
@@ -714,7 +714,7 @@ func TestReconcileFindsMissingTerminalEventWithoutReplayingWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	var follows []json.RawMessage
-	if err = json.Unmarshal(call(t, h, 1001, "duet_query", `{"query":"followups"}`), &follows); err != nil {
+	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_query", `{"query":"followups"}`), &follows); err != nil {
 		t.Fatal(err)
 	}
 	if len(follows) != 1 {
@@ -748,7 +748,7 @@ func TestSubmitDispatchesOnceAndKeepsNativeExecutionSeparateFromVerification(t *
 	if err := wsjson.Read(ctx, conn, &ack); err != nil {
 		t.Fatal(err)
 	}
-	prepared := call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","input":"make report"}`)
+	prepared := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"make report"}`)
 	var ids struct {
 		TaskID      string `json:"task_id"`
 		OperationID string `json:"operation_id"`
@@ -769,15 +769,15 @@ func TestSubmitDispatchesOnceAndKeepsNativeExecutionSeparateFromVerification(t *
 		data, _ := json.Marshal(task)
 		peerDone <- wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "result", ID: f.ID, Result: &protocol.Result{OperationID: ids.OperationID, TaskID: ids.TaskID, Stage: "accepted", ThreadID: "thread-a", TurnID: "turn-a", Data: data}})
 	}()
-	first := call(t, h, 1001, "duet_submit", `{"operation_id":"`+ids.OperationID+`"}`)
+	first := call(t, h, 1001, "dots_lite_submit", `{"operation_id":"`+ids.OperationID+`"}`)
 	if err := <-peerDone; err != nil {
 		t.Fatal(err)
 	}
-	second := call(t, h, 1001, "duet_submit", `{"operation_id":"`+ids.OperationID+`"}`)
+	second := call(t, h, 1001, "dots_lite_submit", `{"operation_id":"`+ids.OperationID+`"}`)
 	if string(first) != string(second) {
 		t.Fatalf("same operation changed: %s vs %s", first, second)
 	}
-	taskJSON := call(t, h, 1001, "duet_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
+	taskJSON := call(t, h, 1001, "dots_lite_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
 	var task protocol.Task
 	_ = json.Unmarshal(taskJSON, &task)
 	if task.ThreadID != "thread-a" || task.Execution != "running" || task.Verification != "pending" || task.Delivery != "pending" {
@@ -792,7 +792,7 @@ func TestSubmitDispatchesOnceAndKeepsNativeExecutionSeparateFromVerification(t *
 	if ack.AckSequence != 1 {
 		t.Fatalf("event not acknowledged: %+v", ack)
 	}
-	taskJSON = call(t, h, 1001, "duet_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
+	taskJSON = call(t, h, 1001, "dots_lite_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`)
 	_ = json.Unmarshal(taskJSON, &task)
 	if task.Execution != "completed" || task.Verification != "pending" || task.Delivery != "pending" {
 		t.Fatalf("turn completion is not independent: %s", taskJSON)
@@ -827,28 +827,28 @@ func TestSubmitDispatchesOnceAndKeepsNativeExecutionSeparateFromVerification(t *
 		t.Fatalf("followup was not prebound: %s", followJSON)
 	}
 	apiArgs := json.RawMessage(`{"query":"task","task_id":"` + ids.TaskID + `"}`)
-	apiRef, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "duet_query", Arguments: apiArgs, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: follow.SessionID, SessionID: "physical-session", NativeTaskID: "native-run", ToolCallID: "tool-call"}})
+	apiRef, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "dots_lite_query", Arguments: apiArgs, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: follow.SessionID, SessionID: "physical-session", NativeTaskID: "native-run", ToolCallID: "tool-call"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "duet_query", Arguments: apiArgs, ContextRef: apiRef}); err != nil {
+	if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "dots_lite_query", Arguments: apiArgs, ContextRef: apiRef}); err != nil {
 		t.Fatal("prebound API could not query its task:", err)
 	}
 	emptyEvidence := json.RawMessage(`{"task_id":"` + ids.TaskID + `","kind":"followup","status":"handled","evidence":{"actions":[],"verification":{}}}`)
-	emptyRef, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "duet_record", Arguments: emptyEvidence, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: follow.SessionID, SessionID: "physical-session", NativeTaskID: "native-run", ToolCallID: "record-tool-call"}})
+	emptyRef, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "dots_lite_record", Arguments: emptyEvidence, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: follow.SessionID, SessionID: "physical-session", NativeTaskID: "native-run", ToolCallID: "record-tool-call"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "duet_record", Arguments: emptyEvidence, ContextRef: emptyRef}); err == nil {
+	if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "dots_lite_record", Arguments: emptyEvidence, ContextRef: emptyRef}); err == nil {
 		t.Fatal("empty actions and verification marked followup handled")
 	}
 	for _, status := range []string{"handled", "waiting_user"} {
 		evidence := json.RawMessage(`{"task_id":"` + ids.TaskID + `","kind":"followup","status":"` + status + `","evidence":{"actions":["inspected native history"],"verification":{"observed":"report exists"}}}`)
-		ref, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "duet_record", Arguments: evidence, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: follow.SessionID, SessionID: "physical-session", NativeTaskID: "native-run", ToolCallID: "record-" + status}})
+		ref, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "dots_lite_record", Arguments: evidence, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: follow.SessionID, SessionID: "physical-session", NativeTaskID: "native-run", ToolCallID: "record-" + status}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "duet_record", Arguments: evidence, ContextRef: ref}); err != nil {
+		if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "dots_lite_record", Arguments: evidence, ContextRef: ref}); err != nil {
 			t.Fatal(err)
 		}
 		run := json.RawMessage(`{"run_id":"run-a","session_id":"` + follow.SessionID + `","status":"completed"}`)

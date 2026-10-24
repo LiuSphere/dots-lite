@@ -63,7 +63,7 @@ plugins:
                                                           "context_ref": registered["context_ref"]})
 
         def query(name, task_id=None):
-            return call("duet_query", {"query": name, **({"task_id": task_id} if task_id else {})})
+            return call("dots_lite_query", {"query": name, **({"task_id": task_id} if task_id else {})})
 
         # Read first. Never claim another test's artifact or delivery outbox unit.
         for task in query("tasks"):
@@ -99,14 +99,14 @@ plugins:
         set_session_vars(platform="weixin", chat_id="wxid_fixture_only", user_id="sender-fixture",
                          session_key=session_key, session_id=origin["session_id"], message_id=message_id)
         try:
-            directives = invoke_hook("pre_tool_call", tool_name="mcp__dots_duet__duet_prepare", args=args,
+            directives = invoke_hook("pre_tool_call", tool_name="mcp__dots_lite__dots_lite_prepare", args=args,
                                      task_id="explicit-test-fixture", tool_call_id=uuid.uuid4().hex)
         finally:
             clear_session_vars([])
         modified = next((row["args"] for row in directives if isinstance(row, dict) and row.get("action") == "modify"), None)
         if not modified or {key: value for key, value in modified.items() if key != "_context_ref"} != args:
             raise RuntimeError("Official trusted plugin did not register path-only model arguments: " + json.dumps(directives))
-        prepared = hub.request("POST", "/v1/tools/call", {"tool": "duet_prepare", "arguments": args,
+        prepared = hub.request("POST", "/v1/tools/call", {"tool": "dots_lite_prepare", "arguments": args,
                                                            "context_ref": modified["_context_ref"]})
         task_id = prepared["task_id"]
         sent = []
@@ -134,7 +134,7 @@ plugins:
         worker = FollowupWorker(hub, None, Sender())
         report = None
         try:
-            accepted = call("duet_submit", {"operation_id": prepared["operation_id"]})
+            accepted = call("dots_lite_submit", {"operation_id": prepared["operation_id"]})
             if accepted.get("stage") != "accepted":
                 raise RuntimeError("Actual executor did not accept fixture task: " + json.dumps(accepted))
             deadline = time.monotonic() + options.timeout
@@ -155,7 +155,7 @@ plugins:
             actual = Path(acquired["local_path"]).read_bytes()
             if actual != data or hashlib.sha256(actual).hexdigest() != digest:
                 raise RuntimeError("Actual private artifact does not equal original binary ingress bytes")
-            call("duet_record", {"task_id": task_id, "kind": "verification", "status": "passed",
+            call("dots_lite_record", {"task_id": task_id, "kind": "verification", "status": "passed",
                                  "evidence": {"checks": [{"observed": "Private artifact exactly equals original 19-byte binary input",
                                                           "sha256": digest, "size": len(actual)}]}})
             for _ in range(4):
@@ -180,7 +180,7 @@ plugins:
                       "real_hub_worker_official_send_helper": True, "fixture_native_receipts": deliveries,
                       "real_weixin_sent": False, "source_is_explicit_test_fixture": True}
         finally:
-            stopped = call("duet_stop", {"task_id": task_id})
+            stopped = call("dots_lite_stop", {"task_id": task_id})
             if not stopped.get("pause_recorded") or not query("task", task_id).get("paused"):
                 raise RuntimeError("Fixture task pause intent was not persisted")
         options.report.write_text(json.dumps(report, ensure_ascii=False, indent=2))

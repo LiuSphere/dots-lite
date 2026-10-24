@@ -31,10 +31,10 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                     async with ClientSession(*streams) as session:
                         await session.initialize()
                         for tool, arguments in (
-                            ("duet_query", {"query": "folders"}),
-                            ("duet_query", {"query": "directory", "folder_id": "authorized", "path": "."}),
-                            ("duet_prepare", {"action": "task.create", "folder_id": "authorized", "working_directory": "nested/child", "input": "work"}),
-                            ("duet_prepare", {"action": "task.continue", "task_id": "Q1", "working_directory": "nested/child", "input": "continue"}),
+                            ("dots_lite_query", {"query": "folders"}),
+                            ("dots_lite_query", {"query": "directory", "folder_id": "authorized", "path": "."}),
+                            ("dots_lite_prepare", {"action": "task.create", "folder_id": "authorized", "working_directory": "nested/child", "input": "work"}),
+                            ("dots_lite_prepare", {"action": "task.continue", "task_id": "Q1", "working_directory": "nested/child", "input": "continue"}),
                         ):
                             result = await session.call_tool(tool, {**arguments, "_context_ref": "trusted-folder-registration"})
                             self.assertFalse(result.is_error, result)
@@ -57,15 +57,31 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                             {"action": "task.create", "project_id": "demo", "inputs": [{"name": "input.bin", "local_path": "/native/input.bin"}]},
                             {"action": "files.upload", "task_id": "Q1", "upload": {"name": "input.bin", "local_path": "/native/input.bin"}},
                         ):
-                            result = await session.call_tool("duet_prepare", {**args, "_context_ref": "private-registration"})
+                            result = await session.call_tool("dots_lite_prepare", {**args, "_context_ref": "private-registration"})
                             self.assertFalse(result.is_error, result)
                             self.assertEqual(requests[-1][1]["arguments"], args)
-                        raw = await session.call_tool("duet_prepare", {
+                        raw = await session.call_tool("dots_lite_prepare", {
                             "action": "files.upload", "task_id": "Q1", "_context_ref": "private-registration",
                             "upload": {"name": "input.bin", "data_base64": "YWJj", "sha256": "0" * 64, "size": 3},
                         })
                         self.assertTrue(raw.is_error)
                         self.assertEqual(len(requests), 2)
+
+    async def test_current_namespace_is_discovered_and_old_tool_is_rejected(self):
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "dots_lite_hermes"], env=dict(os.environ),
+        )
+        async with asyncio.timeout(10):
+            async with stdio_client(params) as streams:
+                async with ClientSession(*streams) as session:
+                    await session.initialize()
+                    tools = (await session.list_tools()).tools
+                    self.assertEqual({tool.name for tool in tools}, {
+                        "dots_lite_query", "dots_lite_prepare", "dots_lite_submit",
+                        "dots_lite_stop", "dots_lite_answer", "dots_lite_approve", "dots_lite_record",
+                    })
+                    legacy = await session.call_tool("duet_query", {"query": "tasks"})
+                    self.assertTrue(legacy.is_error)
 
     async def test_unbound_tool_call_is_rejected_over_real_stdio(self):
         params = StdioServerParameters(
@@ -78,8 +94,8 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 async with ClientSession(*streams) as session:
                     await session.initialize()
                     listed = await session.list_tools()
-                    self.assertIn("duet_query", {tool.name for tool in listed.tools})
-                    result = await session.call_tool("duet_query", {"query": "tasks"})
+                    self.assertIn("dots_lite_query", {tool.name for tool in listed.tools})
+                    result = await session.call_tool("dots_lite_query", {"query": "tasks"})
                     self.assertTrue(result.is_error)
                     self.assertIn("context", result.content[0].text.lower())
 
@@ -94,13 +110,13 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 async with stdio_client(params) as streams:
                     async with ClientSession(*streams) as session:
                         await session.initialize()
-                        result = await session.call_tool("duet_query", {
+                        result = await session.call_tool("dots_lite_query", {
                             "query": "tasks", "_context_ref": "registered-reference",
                         })
                         self.assertFalse(result.is_error)
                         self.assertEqual(json.loads(result.content[0].text), {"tasks": [{"task_id": "Q1"}]})
             self.assertEqual(requests, [("/v1/tools/call", {
-                "tool": "duet_query", "arguments": {"query": "tasks"},
+                "tool": "dots_lite_query", "arguments": {"query": "tasks"},
                 "context_ref": "registered-reference",
             })])
 
@@ -130,14 +146,14 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 async with stdio_client(params) as streams:
                     async with ClientSession(*streams, elicitation_callback=approve) as session:
                         await session.initialize()
-                        result = await session.call_tool("duet_approve", {
+                        result = await session.call_tool("dots_lite_approve", {
                             "task_id": "Q1", "request_id": "P1", "_context_ref": "approval-reference",
                         })
                         self.assertFalse(result.is_error)
             self.assertEqual(len(prompts), 1)
             self.assertIn("echo harmless", prompts[0])
             self.assertEqual(requests[-1], ("/v1/approvals/confirm", {
-                "tool": "duet_approve", "arguments": {"task_id": "Q1", "request_id": "P1"},
+                "tool": "dots_lite_approve", "arguments": {"task_id": "Q1", "request_id": "P1"},
                 "context_ref": "approval-reference", "request_id": "P1",
                 "instance_id": "instance-a", "decision": "accept",
             }))
@@ -161,7 +177,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                             async with stdio_client(params) as streams:
                                 async with ClientSession(*streams) as session:
                                     await session.initialize()
-                                    result = await session.call_tool("duet_query", {
+                                    result = await session.call_tool("dots_lite_query", {
                                         "query": "download", "task_id": "Q1", "path": "out/result.bin",
                                         "_context_ref": "file-reference",
                                     })
@@ -190,7 +206,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                     return {"submitted": True}
 
                 with hub_peer(responder) as (socket_path, requests):
-                    result = await self.call_bound(socket_path, "duet_approve", {
+                    result = await self.call_bound(socket_path, "dots_lite_approve", {
                         "task_id": "Q1", "request_id": "P1",
                     }, answer)
                     self.assertFalse(result.is_error)
@@ -211,7 +227,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
         for extra in ({}, {"decision": "accept"}, {"approved": True}):
             with self.subTest(extra=extra):
                 with hub_peer(responder) as (socket_path, requests):
-                    result = await self.call_bound(socket_path, "duet_approve", {
+                    result = await self.call_bound(socket_path, "dots_lite_approve", {
                         "task_id": "Q1", "request_id": "P1", **extra,
                     })
                     self.assertTrue(result.is_error)
@@ -227,7 +243,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(response=response):
                 with tempfile.TemporaryDirectory() as files:
                     with hub_peer(lambda path, body: response) as (socket_path, requests):
-                        result = await self.call_bound(socket_path, "duet_query", {
+                        result = await self.call_bound(socket_path, "dots_lite_query", {
                             "query": "download", "task_id": "Q1", "path": "out/result.bin",
                         }, files=files)
                         self.assertTrue(result.is_error)
@@ -242,7 +258,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
         }
         with tempfile.TemporaryDirectory() as files:
             with hub_peer(lambda path, body: payload) as (socket_path, requests):
-                result = await self.call_bound(socket_path, "duet_query", {
+                result = await self.call_bound(socket_path, "dots_lite_query", {
                     "query": "download", "task_id": "Q1", "path": "out/result.bin", "offset": 1,
                 }, files=files)
                 self.assertFalse(result.is_error)
@@ -261,7 +277,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.subTest(arguments=arguments):
                 with hub_peer() as (socket_path, requests):
-                    result = await self.call_bound(socket_path, "duet_prepare", arguments)
+                    result = await self.call_bound(socket_path, "dots_lite_prepare", arguments)
                     self.assertTrue(result.is_error)
                     self.assertEqual(requests, [])
 

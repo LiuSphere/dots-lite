@@ -32,13 +32,13 @@ ATTACHMENT = {
     "required": ["name", "local_path"],
 }
 TOOL_SCHEMAS = {
-    "duet_query": schema({
+    "dots_lite_query": schema({
         "query": {"type": "string", "enum": list(QUERIES)},
         "task_id": STRING, "operation_id": STRING, "folder_id": STRING, "project_id": STRING,
         "path": STRING, "cursor": STRING, "offset": {"type": "integer", "minimum": 0},
         "length": {"type": "integer", "minimum": 1, "maximum": 8 * 1024 * 1024},
     }, ["query"]),
-    "duet_prepare": schema({
+    "dots_lite_prepare": schema({
         "action": {"type": "string", "enum": [
             "task.create", "task.continue", "turn.steer", "goal.set", "files.upload",
         ]},
@@ -52,31 +52,31 @@ TOOL_SCHEMAS = {
         "inputs": {"type": "array", "items": ATTACHMENT},
         "upload": ATTACHMENT,
     }, ["action"]),
-    "duet_submit": schema({"operation_id": STRING}, ["operation_id"]),
-    "duet_stop": schema({"task_id": STRING}, ["task_id"]),
-    "duet_answer": schema({
+    "dots_lite_submit": schema({"operation_id": STRING}, ["operation_id"]),
+    "dots_lite_stop": schema({"task_id": STRING}, ["task_id"]),
+    "dots_lite_answer": schema({
         "task_id": STRING, "request_id": STRING, "answer": OBJECT,
     }, ["task_id", "request_id", "answer"]),
-    "duet_approve": schema({
+    "dots_lite_approve": schema({
         "task_id": STRING, "request_id": STRING,
     }, ["task_id", "request_id"]),
-    "duet_record": schema({
+    "dots_lite_record": schema({
         "task_id": STRING,
         "kind": {"type": "string", "enum": ["verification", "delivery", "followup"]},
         "status": STRING, "evidence": OBJECT,
     }, ["task_id", "kind", "status", "evidence"]),
 }
-TOOL_SCHEMAS["duet_prepare"]["allOf"] = [{
+TOOL_SCHEMAS["dots_lite_prepare"]["allOf"] = [{
     "if": {"properties": {"action": {"const": "files.upload"}}},
     "then": {"required": ["task_id", "upload"]},
 }]
 
 DESCRIPTIONS = {
-    "duet_query": "Query your bound machine, authorized folders, tasks, operations, requests, or files. Use folders to select a folder_id. directory without task_id requires explicit folder_id and lists relative to that folder; text/download and task directory queries are relative to the task's fixed working directory. projects/project_id are compatibility aliases for folders/folder_id. session returns native thread/runtime and pending requests; goal returns the actual native Goal.",
-    "duet_prepare": "Register a business operation without executing it. task.create selects folder_id and an optional relative working_directory (default '.'); later operations cannot change that directory. project_id is a compatibility alias for folder_id. Keep operation_id before submitting. task.create inputs and files.upload upload accept name/local_path references to attachments in this exact inbound message. Never supply file bytes, Base64 or a different message's files. submit performs the write.",
-    "duet_submit": "Submit a previously registered operation. An uncertain result must be queried, not recreated.",
-    "duet_stop": "Persist pause intent and request native Goal pause and turn interruption for this task.",
-    "duet_answer": "Answer a structured technical question. This does not grant approvals or permissions.",
-    "duet_approve": "Ask the original human to approve or decline one pending native approval through MCP elicitation.",
-    "duet_record": "Record verification, delivery, or followup evidence without treating model claims as execution proof.",
+    "dots_lite_query": "Query your bound machine, authorized folders, tasks, operations, requests, or files. Use folders to select a folder_id. directory without task_id requires explicit folder_id and lists relative to that folder; text/download and task directory queries are relative to the task's fixed working directory. projects/project_id are compatibility aliases for folders/folder_id. session returns native thread/runtime and pending requests; goal returns the actual native Goal.",
+    "dots_lite_prepare": "Register a business operation without executing it. task.create selects folder_id and an optional relative working_directory (default '.'); later operations cannot change that directory. project_id is a compatibility alias for folder_id. Keep operation_id before submitting. task.create inputs and files.upload upload accept name/local_path references to attachments in this exact inbound message. Never supply file bytes, Base64 or a different message's files. submit performs the write.",
+    "dots_lite_submit": "Submit a previously registered operation. An uncertain result must be queried, not recreated.",
+    "dots_lite_stop": "Persist pause intent and request native Goal pause and turn interruption for this task.",
+    "dots_lite_answer": "Answer a structured technical question. This does not grant approvals or permissions.",
+    "dots_lite_approve": "Ask the original human to approve or decline one pending native approval through MCP elicitation.",
+    "dots_lite_record": "Record verification, delivery, or followup evidence without treating model claims as execution proof.",
 }

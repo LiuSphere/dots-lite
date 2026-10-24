@@ -19,7 +19,7 @@ async def smoke(options):
 
     def register(arguments, source):
         return hub.request("POST", "/v1/invocations", {
-            "tool": "duet_query", "arguments": arguments, "source": source,
+            "tool": "dots_lite_query", "arguments": arguments, "source": source,
         })["context_ref"]
 
     arguments = {"query": "followups", "task_id": options.task_id}
@@ -37,7 +37,7 @@ async def smoke(options):
             async with ClientSession(*streams) as session:
                 await session.initialize()
                 async def read(source):
-                    result = await session.call_tool("duet_query", {
+                    result = await session.call_tool("dots_lite_query", {
                         **arguments, "_context_ref": register(arguments, source),
                     })
                     if result.is_error:

@@ -103,13 +103,13 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 	defer ticker.Stop()
 	for {
 		ref, err := h.RegisterInvocation(ctx, 101, protocol.Invocation{
-			Tool: "duet_query", Arguments: args,
+			Tool: "dots_lite_query", Arguments: args,
 			Source: protocol.Source{Kind: "gateway", Platform: "fixture", SenderID: "sender", ChatID: "chat", SessionID: "fixture-session"},
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := h.Call(ctx, 101, protocol.ToolRequest{Tool: "duet_query", Arguments: args, ContextRef: ref})
+		result, err := h.Call(ctx, 101, protocol.ToolRequest{Tool: "dots_lite_query", Arguments: args, ContextRef: ref})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,12 +156,12 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 	}
 	prepareArgs := map[string]any{"action": "task.create", "project_id": "project", "input": "Create the fixture proof file", "name": "fixture task"}
 	if workingDirectory != "" {
-		folders := callTool("duet_query", map[string]string{"query": "folders"})
+		folders := callTool("dots_lite_query", map[string]string{"query": "folders"})
 		var listed []protocol.Project
 		if err := json.Unmarshal(folders, &listed); err != nil || len(listed) != 1 || listed[0].Root != authorizedRoot {
 			t.Fatalf("authorized folders: %s, %v", folders, err)
 		}
-		directory := callTool("duet_query", map[string]string{"query": "directory", "folder_id": "project", "path": "team-a"})
+		directory := callTool("dots_lite_query", map[string]string{"query": "directory", "folder_id": "project", "path": "team-a"})
 		var listing struct {
 			Entries []struct {
 				Name        string `json:"name"`
@@ -187,7 +187,7 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 			attachments = append(attachments, protocol.InvocationAttachment{LocalPath: file.Path, File: protocol.FileUpload{Name: file.Name, DataBase64: base64.StdEncoding.EncodeToString(file.Data), SHA256: hex.EncodeToString(sum[:]), Size: int64(len(file.Data))}})
 		}
 	}
-	prepared := callTool("duet_prepare", prepareArgs, attachments...)
+	prepared := callTool("dots_lite_prepare", prepareArgs, attachments...)
 	assertPublic := func(raw json.RawMessage) {
 		t.Helper()
 		if bytes.Contains(raw, []byte("data_base64")) || bytes.Contains(raw, []byte(base64.StdEncoding.EncodeToString([]byte("\x00fixture attachment\r\n\xff")))) {
@@ -213,14 +213,14 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 		if _, err := os.Stat(filepath.Join(projectRoot, ".dots-duet", "attachments", registration.TaskID)); !os.IsNotExist(err) {
 			t.Fatalf("prepare staged input files before submission: %v", err)
 		}
-		assertPublic(callTool("duet_query", map[string]string{"query": "operation", "operation_id": registration.OperationID}))
-		assertPublic(callTool("duet_query", map[string]string{"query": "operations", "task_id": registration.TaskID}))
+		assertPublic(callTool("dots_lite_query", map[string]string{"query": "operation", "operation_id": registration.OperationID}))
+		assertPublic(callTool("dots_lite_query", map[string]string{"query": "operations", "task_id": registration.TaskID}))
 	}
 	submit := map[string]string{"operation_id": registration.OperationID}
-	submitted := callTool("duet_submit", submit)
+	submitted := callTool("dots_lite_submit", submit)
 	assertPublic(submitted)
 	for {
-		result := callTool("duet_query", map[string]string{"query": "operation", "operation_id": registration.OperationID})
+		result := callTool("dots_lite_query", map[string]string{"query": "operation", "operation_id": registration.OperationID})
 		assertPublic(result)
 		var operation struct {
 			Stage  string           `json:"stage"`
@@ -241,12 +241,12 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 		case <-ticker.C:
 		}
 	}
-	repeated := callTool("duet_submit", submit)
+	repeated := callTool("dots_lite_submit", submit)
 	assertPublic(repeated)
 	if !bytes.Equal(submitted, repeated) {
 		t.Fatalf("duplicate operation changed its persisted receipt: %s / %s", submitted, repeated)
 	}
-	assertPublic(callTool("duet_query", map[string]string{"query": "operations", "task_id": registration.TaskID}))
+	assertPublic(callTool("dots_lite_query", map[string]string{"query": "operations", "task_id": registration.TaskID}))
 	proof, err := os.ReadFile(filepath.Join(projectRoot, "proof.txt"))
 	if err != nil || string(proof) != "executed\n" {
 		t.Fatalf("duplicate submission repeated or lost execution: proof=%q, error=%v", proof, err)
@@ -267,7 +267,7 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 		}
 	}
 	for {
-		result := callTool("duet_query", map[string]string{"query": "task", "task_id": registration.TaskID})
+		result := callTool("dots_lite_query", map[string]string{"query": "task", "task_id": registration.TaskID})
 		var task protocol.Task
 		if err := json.Unmarshal(result, &task); err != nil {
 			t.Fatal(err)
@@ -295,7 +295,7 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 		t.Fatalf("executor snapshot overwrote fast completion: %+v", snapshot.Tasks)
 	}
 	if workingDirectory != "" {
-		text := callTool("duet_query", map[string]string{"query": "text", "task_id": registration.TaskID, "path": "proof.txt"})
+		text := callTool("dots_lite_query", map[string]string{"query": "text", "task_id": registration.TaskID, "path": "proof.txt"})
 		var file struct {
 			Text string `json:"text"`
 		}

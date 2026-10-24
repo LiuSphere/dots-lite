@@ -15,9 +15,9 @@ uv run --project adapters/hermes python -m unittest discover -s adapters/hermes/
 
 发行包使用 Python `>=3.14,<3.15` 与 `mcp==2.0.0`。Windows 不支持本包要求的 UID Unix socket；其 socket 集成测试明确跳过，须在 Linux 运行。
 
-为每个隔离 Linux UID 配置独立的 `DOTS_DUET_SOCKET`。Hermes 原生 MCP 配置的服务器名必须为 `dots_duet`，命令为该包环境的 `python -m dots_lite_hermes`。标准输出只传 MCP 消息。不要把 socket 路径、profile 身份或调用引用交给模型选择。
+为每个隔离 Linux UID 配置独立的 `DOTS_DUET_SOCKET`。Hermes 原生 MCP 配置的服务器名必须为 `dots_lite`，命令为该包环境的 `python -m dots_lite_hermes`。标准输出只传 MCP 消息。不要把 socket 路径、profile 身份或调用引用交给模型选择。
 
-项目更名为 `dots-lite` 后，更新已有部署时须同步修改 MCP 与 worker 的 Python 模块入口和插件源码链接。现有 `dots_duet` 服务器名、`duet_*` 工具、`DOTS_DUET_*` 环境变量及数据目录保持兼容。
+从 v0.2.0 起，MCP 配置键为 `dots_lite`，七个工具统一使用 `dots_lite_*`，旧工具名不再接受。升级时把原 `dots_duet` 配置项重命名为 `dots_lite`，同步更新工具筛选项、Hub、适配包和来源插件，再重启目标 profile。保留其他 MCP 配置；不要并列注册新旧两项。`DOTS_DUET_*` 环境变量、数据目录、配对凭据和数据库继续沿用。
 
 来源插件所在的 Hermes 网关父进程也必须配置 `DOTS_DUET_SOCKET`，不能只设置 MCP 子进程的 env。网关、MCP 和 worker 使用同一 profile UID、HOME、HERMES_HOME 与 DOTS_DUET_FILES_DIR；socket 可由同一个 Hub 提供，再按真实对端 UID 授权。
 
@@ -33,11 +33,11 @@ python -m dots_lite_hermes worker --socket /run/duet/profile.sock --api-url http
 
 ## 工具与可信来源
 
-提供七个工具：`duet_query`、`duet_prepare`、`duet_submit`、`duet_stop`、`duet_answer`、`duet_approve`、`duet_record`。精确参数以 `schemas.py` 为准，不接受额外字段。
+提供七个工具：`dots_lite_query`、`dots_lite_prepare`、`dots_lite_submit`、`dots_lite_stop`、`dots_lite_answer`、`dots_lite_approve`、`dots_lite_record`。精确参数以 `schemas.py` 为准，不接受额外字段。
 
-`duet_query(query="task")` 返回业务任务；`query="session"` 返回当前原生会话、任务与待处理请求；`query="goal"` 返回真实原生 Goal。核验线程是否静止以及是否仍有 active Goal 时，读取后两项，不从业务快照推测。
+`dots_lite_query(query="task")` 返回业务任务；`query="session"` 返回当前原生会话、任务与待处理请求；`query="goal"` 返回真实原生 Goal。核验线程是否静止以及是否仍有 active Goal 时，读取后两项，不从业务快照推测。
 
-输入附件使用 `duet_prepare(action="task.create",inputs=[{name,local_path}],...)`，或 `duet_prepare(action="files.upload",task_id=...,upload={name,local_path})`，取得 operation ID 后再 `duet_submit`。模型只传当前消息附件的路径引用。名称只允许 basename，支持空文件，总量最大 8 MiB。执行端将附件写入任务的 `.dots-duet/attachments/<task-id>/<name>`，拒绝覆盖；prepare 本身不写文件。Hub 与执行端继续校验内容哈希、实际大小和任务归属。
+输入附件使用 `dots_lite_prepare(action="task.create",inputs=[{name,local_path}],...)`，或 `dots_lite_prepare(action="files.upload",task_id=...,upload={name,local_path})`，取得 operation ID 后再 `dots_lite_submit`。模型只传当前消息附件的路径引用。名称只允许 basename，支持空文件，总量最大 8 MiB。执行端将附件写入任务的 `.dots-duet/attachments/<task-id>/<name>`，拒绝覆盖；prepare 本身不写文件。Hub 与执行端继续校验内容哈希、实际大小和任务归属。
 
 pre-dispatch 只收集该消息的原生媒体路径，不能授予读取权。post-admission 经 Hermes 授权后，按平台、发送者、聊天、线程、profile、scope、父聊天及 message ID 精确配对；从官方媒体缓存逐级用不跟随符号链接的句柄读取稳定快照。原始路径与官方内容寻址保留路径均只绑定该条消息。工具调用还须匹配当前原生 session key 和消息。重启后登记丢失则拒绝；不会扩大到整个 HERMES_HOME。字节只进入私有 Invocation.attachment_files HTTP body，不进入 hook 修改参数、模型输入或公开 operation 结果。
 
@@ -47,11 +47,11 @@ pre-dispatch 只收集该消息的原生媒体路径，不能授予读取权。p
 
 API 后台来源的 `chat_id` 为预先绑定的 API session 根，`session_id` 可能是原生压缩后的实际会话。Hub 按预绑定根校验，不用请求返回的 session 反向创建归属。
 
-`duet_approve` 从 Hub 获取原生待审批实例，然后请求 MCP elicitation。收到原生确认流程的 `accept` 或 `decline` 后提交同一实例。取消、MCP 确认调用不可用或结构化权限请求保持 pending。Hermes 渠道缺少通知回调或通知失败时可能返回 `decline`，因此没有显示确认界面不等于仍在 pending，应查询实际请求状态。模型参数中的 `decision`、`approved` 无效。写出确认也不证明原生操作已完成。
+`dots_lite_approve` 从 Hub 获取原生待审批实例，然后请求 MCP elicitation。收到原生确认流程的 `accept` 或 `decline` 后提交同一实例。取消、MCP 确认调用不可用或结构化权限请求保持 pending。Hermes 渠道缺少通知回调或通知失败时可能返回 `decline`，因此没有显示确认界面不等于仍在 pending，应查询实际请求状态。模型参数中的 `decision`、`approved` 无效。写出确认也不证明原生操作已完成。
 
 ## 文件与跟进结果
 
-`duet_query(query="download")` 对收到的 Base64、返回字节数和 SHA-256 进行校验，再写入本 profile 私有目录。默认目录为 `$HERMES_HOME/dots-duet/files`，可用 `DOTS_DUET_FILES_DIR` 配置。Linux 目录须为 700，文件为 600。写入后重新读取核对哈希。
+`dots_lite_query(query="download")` 对收到的 Base64、返回字节数和 SHA-256 进行校验，再写入本 profile 私有目录。默认目录为 `$HERMES_HOME/dots-duet/files`，可用 `DOTS_DUET_FILES_DIR` 配置。Linux 目录须为 700，文件为 600。写入后重新读取核对哈希。
 
 返回结果包含实际 `local_path`，不含 `data_base64`。单文件上限为 8 MiB。只有 offset 为 0、字节数等于全文件大小且 `truncated=false` 才报告 `acquired=complete`；部分范围报告 `partial`。文件获取与微信附件交付是两个状态，私有副本不证明已送到微信。
 
@@ -59,7 +59,7 @@ worker 使用 Hub 已保存的完整 request、session 和 idempotency key。响
 
 每次 worker 先查询 `GET /v1/artifacts/next`。待传产物必须是完整文件；通过上述私有落地校验后，worker 用 `POST /v1/artifacts/{id}/acquired` 回报真实路径、哈希、大小和完整获取状态。失败则记录 `acquired=false` 和具体错误，并让错误可见。文件传输不需要启动模型，也不重跑原任务。模型跟进请求从创建时就不含 Base64；自动传输不改变已保存的 request 或幂等键。
 
-完成待获取文件后，worker 查询 `GET /v1/deliveries/next`，再处理后台模型跟进。Hub 在返回发送单元前持久化 dispatching 与 attempt ID。每个单元只含文本或一个已获取文件，目标来自原任务的平台、聊天和线程。worker 不让模型选择发送命令、Hermes 源码或目标。`duet_query(query="deliveries",task_id=...)` 只查看本任务回执。
+完成待获取文件后，worker 查询 `GET /v1/deliveries/next`，再处理后台模型跟进。Hub 在返回发送单元前持久化 dispatching 与 attempt ID。每个单元只含文本或一个已获取文件，目标来自原任务的平台、聊天和线程。worker 不让模型选择发送命令、Hermes 源码或目标。`dots_lite_query(query="deliveries",task_id=...)` 只查看本任务回执。
 
 发送使用固定 Hermes Python 子进程和官方 `tools.send_message_tool.send_message_tool`。stdin 只传可信 outbox JSON；不另写微信协议或消息循环。helper 精确核对原目标，拒绝回退到 home channel。文本不得含 MEDIA 指令。文件发送前重新检查私有目录、所有者、权限、大小和 SHA-256。随后把已验证句柄读出的字节写入同 profile 私有随机目录，保留文件名并设为只读；原生发送只读取这份快照。快照在整个调用期间保留，发送前后核对，并在结束后清理。原产物路径被替换不会改变实际发送的字节。原生解析必须得到一个文件与空正文。
 

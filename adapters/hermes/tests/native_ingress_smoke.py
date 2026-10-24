@@ -65,7 +65,7 @@ async def smoke(options):
             retained = capture_native_media([staged])[0]
             args = {"action": "files.upload", "task_id": "Q1", "upload": {"name": "input.bin", "local_path": retained["path"]}}
             def tool():
-                return invoke_hook("pre_tool_call", tool_name="mcp__dots_duet__duet_prepare", args=args,
+                return invoke_hook("pre_tool_call", tool_name="mcp__dots_lite__dots_lite_prepare", args=args,
                                    task_id="fixture-task", tool_call_id="fixture-call")
             clear_session_vars([])
             if not any(row.get("action") == "block" for row in tool() if isinstance(row, dict)):

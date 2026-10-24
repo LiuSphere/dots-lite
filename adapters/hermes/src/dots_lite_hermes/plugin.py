@@ -20,7 +20,7 @@ class SourcePlugin:
         self.attachments.admit(session_key, source, message_id)
 
     def pre_tool_call(self, *, tool_name="", args=None, **hook):
-        if not tool_name.startswith("mcp__dots_duet__"):
+        if not tool_name.startswith("mcp__dots_lite__"):
             return None
         try:
             return self._bind_call(tool_name, args, hook)
@@ -30,9 +30,9 @@ class SourcePlugin:
             return {"action": "block", "message": f"Trusted source registration failed ({type(error).__name__}): {error}"}
 
     def _bind_call(self, tool_name, args, hook):
-        tool = tool_name.removeprefix("mcp__dots_duet__")
+        tool = tool_name.removeprefix("mcp__dots_lite__")
         if tool not in TOOL_SCHEMAS:
-            return {"action": "block", "message": "Unknown dots-duet tool; trusted registration refused"}
+            return {"action": "block", "message": "Unknown dots-lite tool; trusted registration refused"}
         session = self.session_context or importlib.import_module("gateway.session_context")
         bound_reader = getattr(session, "bound_session_key", None)
         if not callable(bound_reader):
@@ -42,7 +42,7 @@ class SourcePlugin:
         arguments = dict(args or {})
         arguments.pop("_context_ref", None)
         if any(name in arguments for name in ("source", "_source", "scope", "user_id", "profile_id", "executor_id")):
-            return {"action": "block", "message": "Identity and source are not model-supplied duet arguments"}
+            return {"action": "block", "message": "Identity and source are not model-supplied dots-lite arguments"}
         read = session.get_session_env
         platform = read("HERMES_SESSION_PLATFORM", "")
         source = {
@@ -65,7 +65,7 @@ class SourcePlugin:
         try:
             hub = self.hub or HubClient.from_environment()
             private_files = []
-            if tool == "duet_prepare":
+            if tool == "dots_lite_prepare":
                 attachment_source = {
                     "platform": platform, "user_id": source["sender_id"], "chat_id": source["chat_id"],
                     "thread_id": source["thread_id"], "profile": read("HERMES_SESSION_PROFILE", ""),

@@ -21,7 +21,7 @@ func TestLostWorkerReceiptBecomesUnknownWithoutReplayingSend(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx := context.Background()
 		h, _, taskID := deliveryFixture(t)
-		call(t, h, 1001, "duet_record", `{"task_id":"`+taskID+`","kind":"verification","status":"passed","evidence":{"checks":[{"observed":"report exists"}]}}`)
+		call(t, h, 1001, "dots_lite_record", `{"task_id":"`+taskID+`","kind":"verification","status":"passed","evidence":{"checks":[{"observed":"report exists"}]}}`)
 		raw, err := h.NextDelivery(ctx, 1001)
 		if err != nil {
 			t.Fatal(err)
@@ -44,14 +44,14 @@ func TestLostWorkerReceiptBecomesUnknownWithoutReplayingSend(t *testing.T) {
 		var items []struct {
 			Status string `json:"status"`
 		}
-		if err = json.Unmarshal(call(t, h, 1001, "duet_query", `{"query":"deliveries","task_id":"`+taskID+`"}`), &items); err != nil {
+		if err = json.Unmarshal(call(t, h, 1001, "dots_lite_query", `{"query":"deliveries","task_id":"`+taskID+`"}`), &items); err != nil {
 			t.Fatal(err)
 		}
 		if len(items) != 1 || items[0].Status != "unknown" {
 			t.Fatalf("missing worker receipt stayed in flight: %+v", items)
 		}
 		var task protocol.Task
-		if err = json.Unmarshal(call(t, h, 1001, "duet_query", `{"query":"task","task_id":"`+taskID+`"}`), &task); err != nil {
+		if err = json.Unmarshal(call(t, h, 1001, "dots_lite_query", `{"query":"task","task_id":"`+taskID+`"}`), &task); err != nil {
 			t.Fatal(err)
 		}
 		if task.Delivery != "unknown" {
@@ -79,7 +79,7 @@ func deliveryFixture(t *testing.T) (*hub.Hub, string, string) {
 	var ids struct {
 		TaskID string `json:"task_id"`
 	}
-	if err = json.Unmarshal(call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","input":"make verified report","name":"report"}`), &ids); err != nil {
+	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"make verified report","name":"report"}`), &ids); err != nil {
 		t.Fatal(err)
 	}
 	return h, path, ids.TaskID
@@ -89,9 +89,9 @@ func TestFinalDeliveryUsesOriginalTargetAndRequiresNativeReceipt(t *testing.T) {
 	ctx := context.Background()
 	h, _, taskID := deliveryFixture(t)
 	args := `{"task_id":"` + taskID + `","kind":"verification","status":"passed","evidence":{"checks":[{"command":"check report","exit_code":0,"observed":"report content matches"}]}}`
-	call(t, h, 1001, "duet_record", args)
-	call(t, h, 1001, "duet_record", args)
-	if _, err := h.Call(ctx, 1001, registered(t, h, 1001, "duet_record", `{"task_id":"`+taskID+`","kind":"delivery","status":"delivered","evidence":{"receipt":{"success":true,"message_id":"model-invented"}}}`)); err == nil {
+	call(t, h, 1001, "dots_lite_record", args)
+	call(t, h, 1001, "dots_lite_record", args)
+	if _, err := h.Call(ctx, 1001, registered(t, h, 1001, "dots_lite_record", `{"task_id":"`+taskID+`","kind":"delivery","status":"delivered","evidence":{"receipt":{"success":true,"message_id":"model-invented"}}}`)); err == nil {
 		t.Fatal("model self-report bypassed native delivery outbox")
 	}
 	other, err := h.NextDelivery(ctx, 1002)
@@ -136,7 +136,7 @@ func TestFinalDeliveryUsesOriginalTargetAndRequiresNativeReceipt(t *testing.T) {
 		t.Fatalf("duplicate receipt changed result: %s %s %v", first, second, err)
 	}
 	var task protocol.Task
-	if err = json.Unmarshal(call(t, h, 1001, "duet_query", `{"query":"task","task_id":"`+taskID+`"}`), &task); err != nil {
+	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_query", `{"query":"task","task_id":"`+taskID+`"}`), &task); err != nil {
 		t.Fatal(err)
 	}
 	if task.Delivery != "delivered" {
@@ -175,7 +175,7 @@ func TestAcquiredArtifactNeedsSeparateVerifiedNativeMediaReceipt(t *testing.T) {
 	var ids struct {
 		TaskID string `json:"task_id"`
 	}
-	if err = json.Unmarshal(invoke("duet_prepare", `{"action":"task.create","project_id":"demo","input":"deliver report","artifacts":["out.txt"]}`), &ids); err != nil {
+	if err = json.Unmarshal(invoke("dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"deliver report","artifacts":["out.txt"]}`), &ids); err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(h.WebsocketHandler())
@@ -215,7 +215,7 @@ func TestAcquiredArtifactNeedsSeparateVerifiedNativeMediaReceipt(t *testing.T) {
 	if pending, err := h.NextDelivery(ctx, 1001); err != nil || string(pending) != "null" {
 		t.Fatalf("unverified acquisition created outbound message: %s %v", pending, err)
 	}
-	invoke("duet_record", `{"task_id":"`+ids.TaskID+`","kind":"verification","status":"passed","evidence":{"checks":[{"observed":"file hash matches expected report"}]}}`)
+	invoke("dots_lite_record", `{"task_id":"`+ids.TaskID+`","kind":"verification","status":"passed","evidence":{"checks":[{"observed":"file hash matches expected report"}]}}`)
 	for i := 0; i < 2; i++ {
 		jobRaw, err := h.NextDelivery(ctx, 1001)
 		if err != nil {
@@ -250,7 +250,7 @@ func TestAcquiredArtifactNeedsSeparateVerifiedNativeMediaReceipt(t *testing.T) {
 			t.Fatal(err)
 		}
 		var task protocol.Task
-		if err = json.Unmarshal(invoke("duet_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`), &task); err != nil {
+		if err = json.Unmarshal(invoke("dots_lite_query", `{"query":"task","task_id":"`+ids.TaskID+`"}`), &task); err != nil {
 			t.Fatal(err)
 		}
 		if i == 0 && task.Delivery == "delivered" {
@@ -265,7 +265,7 @@ func TestAcquiredArtifactNeedsSeparateVerifiedNativeMediaReceipt(t *testing.T) {
 func TestUnacknowledgedDeliveryRemainsUnknownAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	h, path, taskID := deliveryFixture(t)
-	call(t, h, 1001, "duet_record", `{"task_id":"`+taskID+`","kind":"verification","status":"passed","evidence":{"checks":[{"observed":"report exists"}]}}`)
+	call(t, h, 1001, "dots_lite_record", `{"task_id":"`+taskID+`","kind":"verification","status":"passed","evidence":{"checks":[{"observed":"report exists"}]}}`)
 	if _, err := h.NextDelivery(ctx, 1001); err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestUnacknowledgedDeliveryRemainsUnknownAcrossRestart(t *testing.T) {
 	var items []struct {
 		Status string `json:"status"`
 	}
-	if err = json.Unmarshal(call(t, restarted, 1001, "duet_query", `{"query":"deliveries","task_id":"`+taskID+`"}`), &items); err != nil {
+	if err = json.Unmarshal(call(t, restarted, 1001, "dots_lite_query", `{"query":"deliveries","task_id":"`+taskID+`"}`), &items); err != nil {
 		t.Fatal(err)
 	}
 	if len(items) != 1 || items[0].Status != "unknown" {
@@ -297,7 +297,7 @@ func TestUnacknowledgedDeliveryRemainsUnknownAcrossRestart(t *testing.T) {
 func TestOnlyDefiniteNonSendCanRetryWithinPersistedBudget(t *testing.T) {
 	ctx := context.Background()
 	h, _, taskID := deliveryFixture(t)
-	call(t, h, 1001, "duet_record", `{"task_id":"`+taskID+`","kind":"verification","status":"passed","evidence":{"checks":[{"observed":"report exists"}]}}`)
+	call(t, h, 1001, "dots_lite_record", `{"task_id":"`+taskID+`","kind":"verification","status":"passed","evidence":{"checks":[{"observed":"report exists"}]}}`)
 	seen := map[string]bool{}
 	for i := 0; i < 3; i++ {
 		raw, err := h.NextDelivery(ctx, 1001)
@@ -328,7 +328,7 @@ func TestOnlyDefiniteNonSendCanRetryWithinPersistedBudget(t *testing.T) {
 		Attempts int               `json:"attempts"`
 		History  []json.RawMessage `json:"attempt_history"`
 	}
-	if err = json.Unmarshal(call(t, h, 1001, "duet_query", `{"query":"deliveries","task_id":"`+taskID+`"}`), &items); err != nil {
+	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_query", `{"query":"deliveries","task_id":"`+taskID+`"}`), &items); err != nil {
 		t.Fatal(err)
 	}
 	if len(items) != 1 || items[0].Status != "blocked" || items[0].Attempts != 3 || len(items[0].History) != 3 {
@@ -339,7 +339,7 @@ func TestOnlyDefiniteNonSendCanRetryWithinPersistedBudget(t *testing.T) {
 func TestAmbiguousAndPartialDeliveryCannotBeRetried(t *testing.T) {
 	ctx := context.Background()
 	h, _, taskID := deliveryFixture(t)
-	call(t, h, 1001, "duet_record", `{"task_id":"`+taskID+`","kind":"verification","status":"passed","evidence":{"checks":[{"observed":"report exists"}]}}`)
+	call(t, h, 1001, "dots_lite_record", `{"task_id":"`+taskID+`","kind":"verification","status":"passed","evidence":{"checks":[{"observed":"report exists"}]}}`)
 	raw, err := h.NextDelivery(ctx, 1001)
 	if err != nil {
 		t.Fatal(err)
@@ -392,7 +392,7 @@ func TestApprovalNoticeDeliveryDoesNotApproveOrCompleteTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	var task protocol.Task
-	if err = json.Unmarshal(call(t, h, 1001, "duet_query", `{"query":"task","task_id":"`+taskID+`"}`), &task); err != nil {
+	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_query", `{"query":"task","task_id":"`+taskID+`"}`), &task); err != nil {
 		t.Fatal(err)
 	}
 	if task.Waiting != "native-request-1" || task.Delivery == "delivered" {
@@ -426,12 +426,12 @@ func TestNativeQuestionsReachHermesBeforeAnyUserNotice(t *testing.T) {
 				t.Fatalf("question was not offered to its Hermes task: %s", raw)
 			}
 			args := json.RawMessage(`{"task_id":"` + taskID + `","kind":"followup","status":"waiting_user","evidence":{"reason":"The project has two valid formatters and needs the user's choice."}}`)
-			ref, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "duet_record", Arguments: args,
+			ref, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "dots_lite_record", Arguments: args,
 				Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: f.SessionID, SessionID: "question-session", NativeTaskID: "diagnose-question", ToolCallID: "needs-choice"}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "duet_record", Arguments: args, ContextRef: ref}); err != nil {
+			if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "dots_lite_record", Arguments: args, ContextRef: ref}); err != nil {
 				t.Fatal(err)
 			}
 			notice, err = h.NextDelivery(ctx, 1001)

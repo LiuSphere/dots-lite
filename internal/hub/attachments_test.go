@@ -16,7 +16,7 @@ import (
 )
 
 func privateCreateInvocation() protocol.Invocation {
-	return protocol.Invocation{Tool: "duet_prepare", Arguments: json.RawMessage(`{"action":"task.create","project_id":"demo","input":"read supplied inputs","inputs":[{"name":"input.txt","local_path":"/allowed/input"},{"name":"empty.txt","local_path":"/allowed/empty"}]}`), Source: protocol.Source{Kind: "gateway", Platform: "test", SenderID: "sender-a", ChatID: "chat-a", SessionID: "session-a"}, AttachmentFiles: []protocol.InvocationAttachment{
+	return protocol.Invocation{Tool: "dots_lite_prepare", Arguments: json.RawMessage(`{"action":"task.create","project_id":"demo","input":"read supplied inputs","inputs":[{"name":"input.txt","local_path":"/allowed/input"},{"name":"empty.txt","local_path":"/allowed/empty"}]}`), Source: protocol.Source{Kind: "gateway", Platform: "test", SenderID: "sender-a", ChatID: "chat-a", SessionID: "session-a"}, AttachmentFiles: []protocol.InvocationAttachment{
 		{LocalPath: "/allowed/input", File: protocol.FileUpload{Name: "input.txt", DataBase64: "YWJj", SHA256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", Size: 3}},
 		{LocalPath: "/allowed/empty", File: protocol.FileUpload{Name: "empty.txt", DataBase64: "", SHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", Size: 0}},
 	}}
@@ -51,7 +51,7 @@ func TestPrivateInputsAreInvocationBoundAndPublicOperationsOmitBytes(t *testing.
 		t.Fatal(err)
 	}
 	for _, args := range []string{`{"query":"operation","operation_id":"` + ids.OperationID + `"}`, `{"query":"operations","task_id":"` + ids.TaskID + `"}`} {
-		public := call(t, h, 1001, "duet_query", args)
+		public := call(t, h, 1001, "dots_lite_query", args)
 		if strings.Contains(string(public), "data_base64") || !strings.Contains(string(public), `"name":"input.txt"`) || !strings.Contains(string(public), `"name":"empty.txt"`) {
 			t.Fatalf("public input metadata leaked or lost data: %s", public)
 		}
@@ -71,7 +71,7 @@ func TestPrivateInputsAreInvocationBoundAndPublicOperationsOmitBytes(t *testing.
 		data, _ := json.Marshal(protocol.Task{ID: ids.TaskID, Scope: frame.Operation.Scope, Version: 1, Execution: "running"})
 		done <- wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "result", ID: frame.ID, Result: &protocol.Result{OperationID: frame.Operation.ID, TaskID: ids.TaskID, Stage: "accepted", Data: data}})
 	}()
-	result := call(t, h, 1001, "duet_submit", `{"operation_id":"`+ids.OperationID+`"}`)
+	result := call(t, h, 1001, "dots_lite_submit", `{"operation_id":"`+ids.OperationID+`"}`)
 	if err = <-done; err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestPrivateAttachmentRegistrationRejectsMissingTamperedOrWrongSourceData(t 
 			case "extra":
 				inv.AttachmentFiles = append(inv.AttachmentFiles, protocol.InvocationAttachment{LocalPath: "/extra", File: inv.AttachmentFiles[1].File})
 			case "other_tool":
-				inv.Tool = "duet_query"
+				inv.Tool = "dots_lite_query"
 			case "api":
 				inv.Source = protocol.Source{Kind: "api", Platform: "api_server", ChatID: "unregistered-api", SessionID: "native", NativeTaskID: "run", ToolCallID: "call"}
 			case "duplicate":
@@ -124,7 +124,7 @@ func TestPrivateUploadReferenceAndLegacyRawUploadKeepBytesOffPublicResults(t *te
 				raw, _ := json.Marshal(file.File)
 				upload = string(raw)
 			}
-			inv := protocol.Invocation{Tool: "duet_prepare", Arguments: json.RawMessage(`{"action":"files.upload","task_id":"` + taskID + `","upload":` + upload + `}`), Source: base.Source}
+			inv := protocol.Invocation{Tool: "dots_lite_prepare", Arguments: json.RawMessage(`{"action":"files.upload","task_id":"` + taskID + `","upload":` + upload + `}`), Source: base.Source}
 			if mode == "reference" {
 				inv.AttachmentFiles = []protocol.InvocationAttachment{file}
 			}
@@ -155,11 +155,11 @@ func TestPrivateUploadReferenceAndLegacyRawUploadKeepBytesOffPublicResults(t *te
 				}
 				done <- wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "result", ID: frame.ID, Result: &protocol.Result{OperationID: frame.Operation.ID, TaskID: taskID, Stage: "accepted", Data: json.RawMessage(`{"path":".dots-duet/attachments/input.txt","size":3}`)}})
 			}()
-			result := call(t, h, 1001, "duet_submit", `{"operation_id":"`+ids.ID+`"}`)
+			result := call(t, h, 1001, "dots_lite_submit", `{"operation_id":"`+ids.ID+`"}`)
 			if err = <-done; err != nil {
 				t.Fatal(err)
 			}
-			for _, raw := range []json.RawMessage{prepared, result, call(t, h, 1001, "duet_query", `{"query":"operation","operation_id":"`+ids.ID+`"}`), call(t, h, 1001, "duet_query", `{"query":"operations","task_id":"`+taskID+`"}`)} {
+			for _, raw := range []json.RawMessage{prepared, result, call(t, h, 1001, "dots_lite_query", `{"query":"operation","operation_id":"`+ids.ID+`"}`), call(t, h, 1001, "dots_lite_query", `{"query":"operations","task_id":"`+taskID+`"}`)} {
 				if strings.Contains(string(raw), "data_base64") || strings.Contains(string(raw), "YWJj") {
 					t.Fatalf("public upload result leaked private bytes: %s", raw)
 				}

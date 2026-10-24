@@ -22,7 +22,7 @@ async def smoke(options):
         "native_task_id": "explicit-test-fixture", "tool_call_id": "query-tasks",
     }
     registered = hub.request("POST", "/v1/invocations", {
-        "tool": "duet_query", "arguments": arguments, "source": source,
+        "tool": "dots_lite_query", "arguments": arguments, "source": source,
     })
     params = StdioServerParameters(
         command=sys.executable, args=["-m", "dots_lite_hermes"],
@@ -32,20 +32,20 @@ async def smoke(options):
         async with stdio_client(params) as streams:
             async with ClientSession(*streams) as session:
                 await session.initialize()
-                result = await session.call_tool("duet_query", {
+                result = await session.call_tool("dots_lite_query", {
                     **arguments, "_context_ref": registered["context_ref"],
                 })
                 if result.is_error:
                     raise RuntimeError(result.content[0].text)
                 tasks = json.loads(result.content[0].text)
-                changed = await session.call_tool("duet_query", {
+                changed = await session.call_tool("dots_lite_query", {
                     "query": "projects", "_context_ref": registered["context_ref"],
                 })
                 if not changed.is_error or "invalid_context" not in changed.content[0].text:
                     raise RuntimeError("Hub did not reject altered arguments for the same context")
     try:
         hub.request("POST", "/v1/invocations", {
-            "tool": "duet_query", "arguments": arguments,
+            "tool": "dots_lite_query", "arguments": arguments,
             "source": {**source, "sender_id": "unbound-sender-" + uuid.uuid4().hex},
         })
     except HubError as error:

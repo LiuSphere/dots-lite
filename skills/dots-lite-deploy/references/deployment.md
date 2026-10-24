@@ -52,7 +52,9 @@ Windows Terminal 为默认终端时，仅对 PowerShell 使用 `-WindowStyle Hid
 
 适配依赖按锁文件安装，业务 UID 能读、不能改。uv 使用 `--link-mode copy`，避免 root 缓存硬链接保留过严权限；仍需以实际 UID 导入确认。
 
-完整适配包目录注册为来源插件，启用时保留原插件。官方 hook 为 pre_gateway_dispatch、post_gateway_admission、pre_tool_call。MCP 名为 dots_duet，七工具为 duet_query、duet_prepare、duet_submit、duet_stop、duet_answer、duet_approve、duet_record。
+完整适配包目录注册为来源插件，启用时保留原插件。官方 hook 为 pre_gateway_dispatch、post_gateway_admission、pre_tool_call。MCP 名为 dots_lite，七工具为 dots_lite_query、dots_lite_prepare、dots_lite_submit、dots_lite_stop、dots_lite_answer、dots_lite_approve、dots_lite_record。
+
+升级 v0.2.0 时将旧 dots_duet MCP 配置项重命名为 dots_lite，保持其他 MCP 项不变；同时更新工具筛选项和来源插件的 mcp__dots_lite__dots_lite_* 前缀。新旧工具名不并存，Hub 与适配包一起切换。已有 scope、token、数据库、环境变量和目录沿用。核对官方发现与 Tool Search 仅呈现新 MCP 项及七个新工具。
 
 网关父进程、MCP、worker 使用同一 profile UID、HOME、HERMES_HOME、DOTS_DUET_SOCKET、DOTS_DUET_FILES_DIR。仅给 MCP 子进程写环境变量不够，来源插件在网关父进程中运行。传输副本目录 700、文件 600，各 profile 分开。
 

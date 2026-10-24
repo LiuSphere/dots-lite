@@ -186,7 +186,7 @@ func (h *Hub) RegisterInvocation(ctx context.Context, uid int, in protocol.Invoc
 	if err != nil {
 		return "", err
 	}
-	if in.Source.Kind == "api" && in.Tool == "duet_query" {
+	if in.Source.Kind == "api" && in.Tool == "dots_lite_query" {
 		var query queryArgs
 		if err := decodeArgs(in.Arguments, &query); err != nil {
 			return "", err
@@ -204,7 +204,7 @@ func (h *Hub) RegisterInvocation(ctx context.Context, uid int, in protocol.Invoc
 			return "", failure("binding_conflict", "API followup cannot enumerate other tasks or their state")
 		}
 	}
-	if in.Source.Kind == "gateway" && in.Tool != "duet_query" {
+	if in.Source.Kind == "gateway" && in.Tool != "dots_lite_query" {
 		var target struct {
 			TaskID      string `json:"task_id"`
 			OperationID string `json:"operation_id"`
@@ -251,7 +251,7 @@ func (h *Hub) RegisterInvocation(ctx context.Context, uid int, in protocol.Invoc
 }
 func knownTool(s string) bool {
 	switch s {
-	case "duet_query", "duet_prepare", "duet_submit", "duet_stop", "duet_answer", "duet_approve", "duet_record":
+	case "dots_lite_query", "dots_lite_prepare", "dots_lite_submit", "dots_lite_stop", "dots_lite_answer", "dots_lite_approve", "dots_lite_record":
 		return true
 	}
 	return false
@@ -280,7 +280,7 @@ func (h *Hub) Call(ctx context.Context, uid int, req protocol.ToolRequest) (json
 	}
 	inv.mu.Lock()
 	defer inv.mu.Unlock()
-	if req.Tool != "duet_query" && inv.Result != nil {
+	if req.Tool != "dots_lite_query" && inv.Result != nil {
 		return append(json.RawMessage(nil), inv.Result...), nil
 	}
 	if err = h.checkBoundTask(ctx, b, inv, req); err != nil {
@@ -288,34 +288,34 @@ func (h *Hub) Call(ctx context.Context, uid int, req protocol.ToolRequest) (json
 	}
 	var result json.RawMessage
 	switch req.Tool {
-	case "duet_query":
+	case "dots_lite_query":
 		result, err = h.query(ctx, b, req.Arguments)
-	case "duet_prepare":
+	case "dots_lite_prepare":
 		result, err = h.prepare(ctx, b, inv, req.Arguments)
-	case "duet_submit":
+	case "dots_lite_submit":
 		var a struct {
 			OperationID string `json:"operation_id"`
 		}
 		if err = decodeArgs(req.Arguments, &a); err == nil {
 			result, err = h.submit(ctx, b, a.OperationID)
 		}
-	case "duet_stop":
+	case "dots_lite_stop":
 		var a struct {
 			TaskID string `json:"task_id"`
 		}
 		if err = decodeArgs(req.Arguments, &a); err == nil {
 			result, err = h.stop(ctx, b, inv.Source, a.TaskID)
 		}
-	case "duet_approve":
+	case "dots_lite_approve":
 		result, err = h.approval(ctx, b, inv, req.Arguments)
-	case "duet_answer":
+	case "dots_lite_answer":
 		result, err = h.answer(ctx, b, inv, req.Arguments)
-	case "duet_record":
+	case "dots_lite_record":
 		result, err = h.record(ctx, b, inv, req.Arguments)
 	default:
 		err = failure("not_implemented", fmt.Sprintf("tool %s is not implemented", req.Tool))
 	}
-	if err == nil && req.Tool != "duet_query" {
+	if err == nil && req.Tool != "dots_lite_query" {
 		inv.Result = append(json.RawMessage(nil), result...)
 	}
 	return result, err

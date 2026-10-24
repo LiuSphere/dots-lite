@@ -62,7 +62,7 @@ func attachmentReferences(raw json.RawMessage) ([]inputReference, error) {
 	return refs, nil
 }
 func bindInvocationAttachments(in protocol.Invocation) ([]protocol.InvocationAttachment, error) {
-	if in.Tool != "duet_prepare" {
+	if in.Tool != "dots_lite_prepare" {
 		if len(in.AttachmentFiles) > 0 {
 			return nil, failure("invalid_attachment", "private attachments require a gateway prepare invocation")
 		}

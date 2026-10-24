@@ -89,7 +89,7 @@ func (h *Hub) createFollowup(tx *store.Tx, b Binding, task taskRecord, event pro
 	if len(evidence) > 16384 {
 		evidence = evidence[:16384] + " [truncated; inspect task history for complete evidence]"
 	}
-	prompt := fmt.Sprintf("Follow up on authorized task %s version %d. Objective: %s\nEvent: %s\nEvidence: %s\nFirst call duet_query(query=session,task_id=%s) to read actual native runtime and duet_query(query=goal,task_id=%s) to read the native Goal. Then inspect existing operations and necessary files; a business snapshot alone is not verification. Do not replay unknown writes, resume a paused task, compete with an active native Goal, approve user decisions, or expand scope. Diagnose and fix clear in-scope failures, verify actual results, and acquire authorized artifacts. Record the actions and verification using duet_record(kind=followup,status=handled,evidence={actions:...,verification:...}); delivery and goal validation remain separate. If action is unsafe or requires user input, record the facts and waiting reason.", task.ID, task.Version, task.Objective, event.Type, evidence, task.ID, task.ID)
+	prompt := fmt.Sprintf("Follow up on authorized task %s version %d. Objective: %s\nEvent: %s\nEvidence: %s\nFirst call dots_lite_query(query=session,task_id=%s) to read actual native runtime and dots_lite_query(query=goal,task_id=%s) to read the native Goal. Then inspect existing operations and necessary files; a business snapshot alone is not verification. Do not replay unknown writes, resume a paused task, compete with an active native Goal, approve user decisions, or expand scope. Diagnose and fix clear in-scope failures, verify actual results, and acquire authorized artifacts. Record the actions and verification using dots_lite_record(kind=followup,status=handled,evidence={actions:...,verification:...}); delivery and goal validation remain separate. If action is unsafe or requires user input, record the facts and waiting reason.", task.ID, task.Version, task.Objective, event.Type, evidence, task.ID, task.ID)
 	body, err := json.Marshal(map[string]string{"input": prompt, "session_id": session})
 	if err != nil {
 		return err
@@ -296,7 +296,7 @@ func (h *Hub) ReportFollowup(ctx context.Context, uid int, id string, body json.
 }
 func (h *Hub) checkBoundTask(ctx context.Context, b Binding, inv *invocation, req protocol.ToolRequest) error {
 	if inv.TaskID == "" {
-		if inv.Source.Kind == "api" && req.Tool != "duet_query" {
+		if inv.Source.Kind == "api" && req.Tool != "dots_lite_query" {
 			return failure("unbound_source", "unbound API context is diagnostic only")
 		}
 		return nil
@@ -312,7 +312,7 @@ func (h *Hub) checkBoundTask(ctx context.Context, b Binding, inv *invocation, re
 	if args.TaskID != "" && args.TaskID != inv.TaskID {
 		return failure("binding_conflict", "API followup cannot change its task")
 	}
-	if req.Tool == "duet_prepare" && (args.Action == "task.create" || args.TaskID == "") {
+	if req.Tool == "dots_lite_prepare" && (args.Action == "task.create" || args.TaskID == "") {
 		return failure("binding_conflict", "API followup must use its registered task")
 	}
 	return h.db.Update(ctx, func(tx *store.Tx) error {
@@ -329,10 +329,10 @@ func (h *Hub) checkBoundTask(ctx context.Context, b Binding, inv *invocation, re
 				return failure("binding_conflict", "API followup cannot submit another task operation")
 			}
 		}
-		if req.Tool != "duet_query" && (task.Version != inv.TaskVersion || (inv.Source.Kind == "api" && task.Paused)) {
+		if req.Tool != "dots_lite_query" && (task.Version != inv.TaskVersion || (inv.Source.Kind == "api" && task.Paused)) {
 			return failure("stale_version", "API followup task changed or paused")
 		}
-		if inv.Source.Kind == "api" && req.Tool != "duet_query" {
+		if inv.Source.Kind == "api" && req.Tool != "dots_lite_query" {
 			return checkAPIAttempt(tx, b, inv.Source)
 		}
 		return nil

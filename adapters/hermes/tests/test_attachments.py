@@ -54,11 +54,11 @@ class AttachmentTests(unittest.TestCase):
                     args = {"action": "files.upload", "task_id": "Q1", "upload": {"name": "empty.bin", "local_path": str(path)}}
                     if not expire_at_admission:
                         with patch("time.monotonic", return_value=100):
-                            valid = plugin.pre_tool_call(tool_name="mcp__dots_duet__duet_prepare", args=args,
+                            valid = plugin.pre_tool_call(tool_name="mcp__dots_lite__dots_lite_prepare", args=args,
                                                          task_id="native", tool_call_id="valid")
                         self.assertEqual(valid["action"], "modify", valid)
                     with patch("time.monotonic", return_value=401):
-                        denied = plugin.pre_tool_call(tool_name="mcp__dots_duet__duet_prepare", args=args,
+                        denied = plugin.pre_tool_call(tool_name="mcp__dots_lite__dots_lite_prepare", args=args,
                                                       task_id="native", tool_call_id="call")
                     self.assertEqual(denied["action"], "block", denied)
 
@@ -93,7 +93,7 @@ class AttachmentTests(unittest.TestCase):
             reference = str(cache / "native-inputs" / hashlib.sha256(path.read_bytes()).hexdigest() / path.name)
             args = {"action": "task.create", "project_id": "demo", "input": "Read the attachment",
                     "inputs": [{"name": "input.bin", "local_path": reference}]}
-            result = plugin.pre_tool_call(tool_name="mcp__dots_duet__duet_prepare", args=args,
+            result = plugin.pre_tool_call(tool_name="mcp__dots_lite__dots_lite_prepare", args=args,
                                           task_id="native-a", tool_call_id="call-a")
             self.assertEqual(result["action"], "modify", result)
             self.assertEqual(result["args"], {**args, "_context_ref": "registered"})
@@ -106,7 +106,7 @@ class AttachmentTests(unittest.TestCase):
             path.write_bytes(b"changed-after-admission")
             upload = {"action": "files.upload", "task_id": "Q1",
                       "upload": {"name": "later.bin", "local_path": str(path)}}
-            result = plugin.pre_tool_call(tool_name="mcp__dots_duet__duet_prepare", args=upload,
+            result = plugin.pre_tool_call(tool_name="mcp__dots_lite__dots_lite_prepare", args=upload,
                                           task_id="native-a", tool_call_id="call-b")
             self.assertEqual(result["action"], "modify", result)
             self.assertEqual(base64.b64decode(hub.body["attachment_files"][0]["file"]["data_base64"]), b"\x00\xffinbound-data\x80")
@@ -118,17 +118,17 @@ class AttachmentTests(unittest.TestCase):
                 with self.subTest(field=field):
                     original = values[field]
                     values[field] = value
-                    denied = plugin.pre_tool_call(tool_name="mcp__dots_duet__duet_prepare", args=upload,
+                    denied = plugin.pre_tool_call(tool_name="mcp__dots_lite__dots_lite_prepare", args=upload,
                                                   task_id="native-a", tool_call_id="denied")
                     values[field] = original
                     self.assertEqual(denied["action"], "block", denied)
             for reference in (str(root / ".env"), str(cache / "other.bin")):
-                denied = plugin.pre_tool_call(tool_name="mcp__dots_duet__duet_prepare",
+                denied = plugin.pre_tool_call(tool_name="mcp__dots_lite__dots_lite_prepare",
                                               args={**upload, "upload": {"name": "x.bin", "local_path": reference}},
                                               task_id="native-a", tool_call_id="denied")
                 self.assertEqual(denied["action"], "block", denied)
             restarted = SourcePlugin(hub=hub, session_context=session, media_roots=lambda: (cache, cache, cache))
-            denied = restarted.pre_tool_call(tool_name="mcp__dots_duet__duet_prepare", args=upload,
+            denied = restarted.pre_tool_call(tool_name="mcp__dots_lite__dots_lite_prepare", args=upload,
                                             task_id="native-a", tool_call_id="denied")
             self.assertEqual(denied["action"], "block", denied)
 
@@ -149,7 +149,7 @@ class AttachmentTests(unittest.TestCase):
             plugin.pre_gateway_dispatch(event=event)
             plugin.post_gateway_admission(session_key="key", source=source, message_id="wrong-message")
             args = {"action": "files.upload", "task_id": "Q1", "upload": {"name": "file.bin", "local_path": str(path)}}
-            denied = plugin.pre_tool_call(tool_name="mcp__dots_duet__duet_prepare", args=args,
+            denied = plugin.pre_tool_call(tool_name="mcp__dots_lite__dots_lite_prepare", args=args,
                                           task_id="native", tool_call_id="call")
             self.assertEqual(denied["action"], "block", denied)
 

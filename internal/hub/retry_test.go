@@ -74,7 +74,7 @@ func connectedHubFixture(t *testing.T, budget int) (context.Context, *hub.Hub, *
 	var ids struct {
 		TaskID string `json:"task_id"`
 	}
-	if err = json.Unmarshal(call(t, h, 1001, "duet_prepare", `{"action":"task.create","project_id":"demo","input":"verify report"}`), &ids); err != nil {
+	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"verify report"}`), &ids); err != nil {
 		t.Fatal(err)
 	}
 	return ctx, h, conn, ids.TaskID
@@ -100,7 +100,7 @@ func TestHandledUnavailableStateDoesNotSuppressLaterQuiescenceInSameTurn(t *test
 	var ops []struct {
 		ID string `json:"operation_id"`
 	}
-	if err := json.Unmarshal(call(t, h, 1001, "duet_query", `{"query":"operations","task_id":"`+taskID+`"}`), &ops); err != nil {
+	if err := json.Unmarshal(call(t, h, 1001, "dots_lite_query", `{"query":"operations","task_id":"`+taskID+`"}`), &ops); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
@@ -122,7 +122,7 @@ func TestHandledUnavailableStateDoesNotSuppressLaterQuiescenceInSameTurn(t *test
 		}
 		done <- wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "result", ID: frame.ID, Result: &protocol.Result{OperationID: frame.Operation.ID, TaskID: taskID, Stage: "failed", Error: &protocol.Error{Code: "native_unready", Message: "native temporarily unavailable"}}})
 	}()
-	call(t, h, 1001, "duet_submit", `{"operation_id":"`+ops[0].ID+`"}`)
+	call(t, h, 1001, "dots_lite_submit", `{"operation_id":"`+ops[0].ID+`"}`)
 	if err := h.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -135,11 +135,11 @@ func TestHandledUnavailableStateDoesNotSuppressLaterQuiescenceInSameTurn(t *test
 	}
 	first := readFollowup(t, raw)
 	evidence := json.RawMessage(`{"task_id":"` + taskID + `","kind":"followup","status":"handled","evidence":{"actions":["checked native availability"],"verification":{"observed":"native unavailable"}}}`)
-	ref, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "duet_record", Arguments: evidence, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: first.SessionID, SessionID: "physical", NativeTaskID: "first-run", ToolCallID: "handled-first"}})
+	ref, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "dots_lite_record", Arguments: evidence, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: first.SessionID, SessionID: "physical", NativeTaskID: "first-run", ToolCallID: "handled-first"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "duet_record", Arguments: evidence, ContextRef: ref}); err != nil {
+	if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "dots_lite_record", Arguments: evidence, ContextRef: ref}); err != nil {
 		t.Fatal(err)
 	}
 	event := protocol.Event{Sequence: 1, TaskID: taskID, InstanceID: "retry-instance", ThreadID: "thread-a", TurnID: "turn-a", Type: "turn/completed", Data: json.RawMessage(`{"turn":{"id":"turn-a","status":"completed"}}`), CreatedAt: time.Now().UTC()}
@@ -200,7 +200,7 @@ func TestTerminalFollowupWithoutBusinessConfirmationCreatesBoundedDiagnosticAtte
 			}
 			first := readFollowup(t, raw)
 			oldArgs := json.RawMessage(`{"task_id":"` + taskID + `","kind":"verification","status":"passed","evidence":{"checks":[{"observed":"late first run"}]}}`)
-			oldRef, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "duet_record", Arguments: oldArgs, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: first.SessionID, SessionID: "physical-old", NativeTaskID: "native-first", ToolCallID: "late-record"}})
+			oldRef, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "dots_lite_record", Arguments: oldArgs, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: first.SessionID, SessionID: "physical-old", NativeTaskID: "native-first", ToolCallID: "late-record"}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -224,15 +224,15 @@ func TestTerminalFollowupWithoutBusinessConfirmationCreatesBoundedDiagnosticAtte
 			if old.Status != "superseded" || next.ID == first.ID || next.SessionID == first.SessionID || next.IdempotencyKey == first.IdempotencyKey || next.RunID != "" || string(old.Request) != string(first.Request) {
 				t.Fatalf("diagnostic attempt did not preserve and replace immutable association: %s / %s", reported, nextRaw)
 			}
-			if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "duet_record", Arguments: oldArgs, ContextRef: oldRef}); err == nil {
+			if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "dots_lite_record", Arguments: oldArgs, ContextRef: oldRef}); err == nil {
 				t.Fatal("superseded session still changed business results")
 			}
 			query := json.RawMessage(`{"query":"task","task_id":"` + taskID + `"}`)
-			ref, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "duet_query", Arguments: query, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: first.SessionID, SessionID: "physical-old", NativeTaskID: "native-first", ToolCallID: "read-old"}})
+			ref, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "dots_lite_query", Arguments: query, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: first.SessionID, SessionID: "physical-old", NativeTaskID: "native-first", ToolCallID: "read-old"}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "duet_query", Arguments: query, ContextRef: ref}); err != nil {
+			if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "dots_lite_query", Arguments: query, ContextRef: ref}); err != nil {
 				t.Fatal(err)
 			}
 			late, err := h.ReportFollowup(ctx, 1001, first.ID, json.RawMessage(`{"run_id":"run-first","status":"failed","evidence":{"output":"late changed output"}}`))
@@ -272,11 +272,11 @@ func TestConfirmedFollowupsDoNotCreateDiagnosticAttempts(t *testing.T) {
 			}
 			f := readFollowup(t, raw)
 			evidence := json.RawMessage(`{"task_id":"` + taskID + `","kind":"followup","status":"` + status + `","evidence":{"actions":["inspected native requests"],"verification":{"observed":"request needs user"}}}`)
-			ref, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "duet_record", Arguments: evidence, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: f.SessionID, SessionID: "physical", NativeTaskID: "native-run", ToolCallID: "record-status"}})
+			ref, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "dots_lite_record", Arguments: evidence, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: f.SessionID, SessionID: "physical", NativeTaskID: "native-run", ToolCallID: "record-status"}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "duet_record", Arguments: evidence, ContextRef: ref}); err != nil {
+			if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "dots_lite_record", Arguments: evidence, ContextRef: ref}); err != nil {
 				t.Fatal(err)
 			}
 			if _, err = h.SaveFollowupRun(ctx, 1001, f.ID, json.RawMessage(`{"run_id":"run-terminal","session_id":"`+f.SessionID+`","status":"completed"}`)); err != nil {

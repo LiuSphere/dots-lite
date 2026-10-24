@@ -102,7 +102,7 @@ type Confirmation struct {
 }
 
 func (h *Hub) ConfirmApproval(ctx context.Context, uid int, in Confirmation) (json.RawMessage, error) {
-	if in.Tool != "duet_approve" || (in.Decision != "accept" && in.Decision != "decline") {
+	if in.Tool != "dots_lite_approve" || (in.Decision != "accept" && in.Decision != "decline") {
 		return nil, failure("invalid_confirmation", "only a single accept or decline is allowed")
 	}
 	b, inv, err := h.validate(uid, in.ToolRequest)

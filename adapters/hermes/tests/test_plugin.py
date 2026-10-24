@@ -17,7 +17,7 @@ class PluginTests(unittest.TestCase):
             "HERMES_SESSION_KEY": "old-session", "HERMES_SESSION_CHAT_ID": "old-chat",
         }):
             result = plugin.pre_tool_call(
-                tool_name="mcp__dots_duet__duet_query", args={"query": "tasks"},
+                tool_name="mcp__dots_lite__dots_lite_query", args={"query": "tasks"},
                 task_id="task-1", session_id="session-1", tool_call_id="call-1",
             )
         self.assertEqual(result["action"], "block")
@@ -42,7 +42,7 @@ class PluginTests(unittest.TestCase):
         hub = Hub()
         plugin = SourcePlugin(hub=hub, session_context=session)
         result = plugin.pre_tool_call(
-            tool_name="mcp__dots_duet__duet_query",
+            tool_name="mcp__dots_lite__dots_lite_query",
             args={"query": "tasks", "_context_ref": "forged-reference"},
             task_id="native-task-a", session_id="session-a", tool_call_id="call-a",
         )
@@ -50,7 +50,7 @@ class PluginTests(unittest.TestCase):
         self.assertEqual(result["args"]["_context_ref"], "trusted-reference")
         method, path, payload = hub.registered
         self.assertEqual((method, path), ("POST", "/v1/invocations"))
-        self.assertEqual(payload["tool"], "duet_query")
+        self.assertEqual(payload["tool"], "dots_lite_query")
         self.assertEqual(payload["arguments"], {"query": "tasks"})
         self.assertEqual(payload["source"]["sender_id"], "sender-a")
         self.assertEqual(payload["source"]["chat_id"], "chat-a")
@@ -64,7 +64,7 @@ class PluginTests(unittest.TestCase):
             bound_session_key=lambda: "native-key", get_session_env=unavailable,
         ))
         result = plugin.pre_tool_call(
-            tool_name="mcp__dots_duet__duet_query",
+            tool_name="mcp__dots_lite__dots_lite_query",
             args={"query": "tasks", "_context_ref": "stale-reference"},
             task_id="task-a", session_id="session-a", tool_call_id="call-a",
         )
