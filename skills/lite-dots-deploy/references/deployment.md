@@ -36,11 +36,13 @@ Hub 使用 systemd。核对启用状态、真实 UID、监听、进程及启动�
 
 用当前普通用户自己的 Codex 和 CODEX_HOME。默认登录触发、Limited、Interactive、隐藏、单实例；失败重启按已确认维护方案设置。常驻任务不应到默认时长后被杀。
 
-计划任务调用 PowerShell 绝对路径，使用 `-NoProfile -NonInteractive -WindowStyle Hidden -File`。启动脚本对子进程使用无可见窗口方式，stdout/stderr 写日志，并保持等待进程，不能启动后立即退出。停止时核对该服务 owned executor/Codex 子进程，保留无关会话。
+Windows Terminal 为默认终端时，仅对 PowerShell 使用 `-WindowStyle Hidden` 仍可能留下可见窗口。将[WindowsServiceLauncher.cs](../assets/WindowsServiceLauncher.cs)以 Windows .NET Framework C# 编译器的 `/target:winexe` 编译到服务 bin 目录，计划任务调用这个 GUI 子系统程序，参数为 PowerShell 与启动脚本的两个绝对路径，各自加引号。具体编译命令见仓库运行指南；编译器缺失时报告依赖，不退回已经失败的直接 PowerShell 入口。
+
+启动入口使用 `UseShellExecute=false`、`CreateNoWindow=true`，等待 PowerShell 并传回原退出码；自身启动失败写入 `..\logs\launcher-host.log` 并返回 1。脚本再以无窗口方式启动执行端、保存 stdout/stderr，并等待执行端。常驻脚本等待是正常生命周期，不能让它提前退出或丢弃失败状态来关闭窗口。停止时核对 owned 进程，保留无关会话；不修改用户全局终端选择。
 
 从用户/系统设置解析 USERPROFILE、APPDATA、LOCALAPPDATA、TEMP、PATH 等；Codex 工具进程的环境可能被过滤。只修该服务子进程环境，保留全局环境与原认证。已有代理按需沿用，并让 Hub 私网地址走正确路径。
 
-核对登录触发、用户、权限、隐藏参数与单实例，再确认进程属主、路径、数量、窗口句柄及 Hub 连接。LastTaskResult 是最近请求结果，IgnoreNew 拒绝重复启动也会改变它，需结合 Running 与实际连接判断。没做系统重启/登录测试时，明确只验证配置和本次启动。
+核对登录触发、用户、权限、GUI 入口与单实例，再确认进程属主、路径、数量、窗口句柄及 Hub 连接。不能只检查 pwsh 的 MainWindowHandle：还要枚举可见 Windows Terminal/控制台窗口，并核对所属进程，避免遗漏独立托管窗口。以临时任务检查无可见窗口和非零退出码传播，测试后清理；不要关闭无关终端。LastTaskResult 是最近请求结果，IgnoreNew 拒绝重复启动也会改变它，需结合 Running 与实际连接判断。没做系统重启/登录测试时，明确只验证配置和本次启动。
 
 ## Hermes、MCP 与 worker
 
