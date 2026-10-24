@@ -2,6 +2,8 @@
 
 此包把 Hermes 的原生 MCP、人工确认和后台 runs 接到 Go Hub。Hub 保存授权、任务和业务事件；适配不创建第二套 Agent 循环，也不替代 Hermes 的原生 run 存储。
 
+首次接入请先看[部署与运行指南](../../docs/运行指南.md)，微信中的日常操作见[使用指南](../../docs/使用指南.md)。本文件说明适配协议和测试边界，不代表生产用户、电脑和项目已绑定。
+
 ## 运行
 
 在项目根目录安装锁定依赖并检查：
@@ -15,6 +17,8 @@ uv run --project adapters/hermes python -m unittest discover -s adapters/hermes/
 
 为每个隔离 Linux UID 配置独立的 `DOTS_DUET_SOCKET`。Hermes 原生 MCP 配置的服务器名必须为 `dots_duet`，命令为该包环境的 `python -m dots_duet_lite_hermes`。标准输出只传 MCP 消息。不要把 socket 路径、profile 身份或调用引用交给模型选择。
 
+来源插件所在的 Hermes 网关父进程也必须配置 `DOTS_DUET_SOCKET`，不能只设置 MCP 子进程的 env。网关、MCP 和 worker 使用同一 profile UID、HOME、HERMES_HOME 与 DOTS_DUET_FILES_DIR；socket 可由同一个 Hub 提供，再按真实对端 UID 授权。
+
 把 `src/dots_duet_lite_hermes/` 作为 Hermes 官方目录插件加载。`plugin.yaml` 声明 `pre_gateway_dispatch`、`post_gateway_admission` 与 `pre_tool_call`，`__init__.py` 是注册入口。插件仅使用标准库，不要求把 MCP SDK 安装进 Hermes 的 Python 环境。插件必须运行在原生消息任务内；缺少当前绑定或可信来源时明确阻止调用。
 
 后台跟进使用独立进程：
@@ -23,7 +27,7 @@ uv run --project adapters/hermes python -m unittest discover -s adapters/hermes/
 python -m dots_duet_lite_hermes worker --socket /run/duet/profile.sock --api-url http://127.0.0.1:8642 --api-token-file /private/profile/api-token --hermes-python /opt/hermes/venv/bin/python --hermes-source /opt/hermes/source
 ```
 
-加 `--once` 只处理一次，失败退出非零。常驻模式每五秒查询，错误写标准错误。API URL 固定来自运维配置，不由模型传入；不跟随重定向。token 文件在 Linux 必须不向组或其他用户开放。原生 API 必须声明持久幂等支持，否则适配拒绝启动模型请求。
+加 `--once` 只处理一次，失败退出非零；它仍可能调用模型或发送原聊天队列，不能用作只读健康检查。常驻模式每五秒查询，错误写标准错误。API URL 固定来自运维配置，使用根地址、不加 `/v1`，不由模型传入；不跟随重定向。token 文件只放裸 token，在 Linux 必须不向组或其他用户开放。原生 API 必须声明持久幂等支持，否则适配拒绝启动模型请求。
 
 ## 工具与可信来源
 
@@ -41,7 +45,7 @@ pre-dispatch 只收集该消息的原生媒体路径，不能授予读取权。p
 
 API 后台来源的 `chat_id` 为预先绑定的 API session 根，`session_id` 可能是原生压缩后的实际会话。Hub 按预绑定根校验，不用请求返回的 session 反向创建归属。
 
-`duet_approve` 从 Hub 获取原生待审批实例，然后请求 MCP elicitation。只有真实 `accept` 或 `decline` 才提交同一实例。取消、客户端无人工确认能力或结构化权限请求均保持 pending。模型参数中的 `decision`、`approved` 无效。写出确认也不证明原生操作已完成。
+`duet_approve` 从 Hub 获取原生待审批实例，然后请求 MCP elicitation。收到原生确认流程的 `accept` 或 `decline` 后提交同一实例。取消、MCP 确认调用不可用或结构化权限请求保持 pending。Hermes 渠道缺少通知回调或通知失败时可能返回 `decline`，因此没有显示确认界面不等于仍在 pending，应查询实际请求状态。模型参数中的 `decision`、`approved` 无效。写出确认也不证明原生操作已完成。
 
 ## 文件与跟进结果
 
