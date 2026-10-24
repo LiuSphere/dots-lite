@@ -95,7 +95,7 @@ func (s *Service) stageInputFiles(ctx context.Context, op protocol.Operation, ta
 	if len(staged) == 0 {
 		return op.Input, nil
 	}
-	return op.Input + "\n\nInput files (paths are relative to the project workspace):\n" + string(mustJSON(staged)), nil
+	return op.Input + "\n\nInput files (paths are relative to the folder workspace):\n" + string(mustJSON(staged)), nil
 }
 
 func (s *Service) recordInputFailure(taskID string, result protocol.Result, staged []inputFileInfo) protocol.Result {
@@ -141,16 +141,16 @@ func (s *Service) uploadFileOperation(ctx context.Context, op protocol.Operation
 	sum := sha256.Sum256(data)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	project, exists := s.projectLocked(op.ProjectID)
-	if !exists || !project.Available {
-		return failResult(r, "project_unavailable", "registered project directory is unavailable")
+	folder, exists := s.folderLocked(op.FolderID)
+	if !exists || !folder.Available {
+		return failResult(r, "folder_unavailable", "registered folder directory is unavailable")
 	}
 	task, err := s.loadTask(ctx, op.TaskID)
 	if err != nil {
 		return failResult(r, "task_not_found", err.Error())
 	}
-	if task.ProjectID != op.ProjectID {
-		return failResult(r, "forbidden", "attachment project differs from the task project")
+	if task.FolderID != op.FolderID {
+		return failResult(r, "forbidden", "attachment folder differs from the task folder")
 	}
 	if task.Version != op.TaskVersion || task.Paused {
 		return failResult(r, "stale_version", "attachment task was paused or changed version")
@@ -159,7 +159,7 @@ func (s *Service) uploadFileOperation(ctx context.Context, op protocol.Operation
 	if err != nil {
 		return failResult(r, "working_directory_unavailable", err.Error())
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT project_root FROM executor_tasks WHERE occupied=1 AND task_id<>?`, task.ID)
+	rows, err := s.db.QueryContext(ctx, `SELECT folder_root FROM executor_tasks WHERE occupied=1 AND task_id<>?`, task.ID)
 	if err != nil {
 		return failResult(r, "storage", err.Error())
 	}
@@ -171,7 +171,7 @@ func (s *Service) uploadFileOperation(ctx context.Context, op protocol.Operation
 		}
 		if rootsOverlap(root, cwd) {
 			rows.Close()
-			return failResult(r, "conflict", "attachment project is occupied by another task")
+			return failResult(r, "conflict", "attachment folder is occupied by another task")
 		}
 	}
 	err = rows.Err()
@@ -182,7 +182,7 @@ func (s *Service) uploadFileOperation(ctx context.Context, op protocol.Operation
 	if err := ctx.Err(); err != nil {
 		return failResult(r, "canceled", err.Error())
 	}
-	dir := filepath.Join(".dots-duet", "attachments", task.ID)
+	dir := filepath.Join(".dots-lite", "attachments", task.ID)
 	if err := root.MkdirAll(dir, 0700); err != nil {
 		return failResult(r, "path_denied", err.Error())
 	}
@@ -231,15 +231,15 @@ func attachmentName(name string) bool {
 // Root.Open supplies the missing atomic traversal restriction for transfer.
 func (s *Service) readFileOperation(ctx context.Context, op protocol.Operation) protocol.Result {
 	s.mu.Lock()
-	p, exists := s.projectLocked(op.ProjectID)
-	root := s.roots[op.ProjectID]
+	p, exists := s.folderLocked(op.FolderID)
+	root := s.roots[op.FolderID]
 	var taskErr error
 	if exists && p.Available && op.TaskID != "" {
 		var task protocol.Task
 		task, taskErr = s.loadTask(ctx, op.TaskID)
-		if taskErr == nil && task.ProjectID != op.ProjectID {
+		if taskErr == nil && task.FolderID != op.FolderID {
 			s.mu.Unlock()
-			return failResult(protocol.Result{OperationID: op.ID, TaskID: op.TaskID, Stage: "failed"}, "forbidden", "file project differs from task project")
+			return failResult(protocol.Result{OperationID: op.ID, TaskID: op.TaskID, Stage: "failed"}, "forbidden", "file folder differs from task folder")
 		}
 		if taskErr == nil {
 			root, _, taskErr = s.taskRootLocked(ctx, task)
@@ -247,7 +247,7 @@ func (s *Service) readFileOperation(ctx context.Context, op protocol.Operation) 
 	}
 	s.mu.Unlock()
 	if !exists || !p.Available {
-		return failResult(protocol.Result{OperationID: op.ID, TaskID: op.TaskID, Stage: "failed"}, "project_unavailable", "registered project directory is unavailable")
+		return failResult(protocol.Result{OperationID: op.ID, TaskID: op.TaskID, Stage: "failed"}, "folder_unavailable", "registered folder directory is unavailable")
 	}
 	if taskErr != nil {
 		return failResult(protocol.Result{OperationID: op.ID, TaskID: op.TaskID, Stage: "failed"}, "working_directory_unavailable", taskErr.Error())
@@ -265,8 +265,8 @@ func (s *Service) readFileAtRoot(ctx context.Context, op protocol.Operation, roo
 		if err != nil {
 			return failResult(r, "task_not_found", err.Error())
 		}
-		if task.ProjectID != op.ProjectID {
-			return failResult(r, "forbidden", "file project differs from task project")
+		if task.FolderID != op.FolderID {
+			return failResult(r, "forbidden", "file folder differs from task folder")
 		}
 	}
 	name := op.Path
@@ -274,7 +274,7 @@ func (s *Service) readFileAtRoot(ctx context.Context, op protocol.Operation, roo
 		name = "."
 	}
 	if !filepath.IsLocal(name) {
-		return failResult(r, "path_denied", "file path must remain inside the registered project")
+		return failResult(r, "path_denied", "file path must remain inside the registered folder")
 	}
 	f, err := root.Open(name)
 	if err != nil {

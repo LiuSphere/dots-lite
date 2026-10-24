@@ -27,8 +27,7 @@ type Binding struct {
 	ProfileID  string          `json:"profile_id"`
 	ExecutorID string          `json:"executor_id"`
 	Token      string          `json:"token"`
-	ProjectIDs []string        `json:"project_ids"`
-	FolderIDs  []string        `json:"folder_ids,omitempty"`
+	FolderIDs  []string        `json:"folder_ids"`
 	Sources    []AllowedSource `json:"sources"`
 }
 
@@ -85,12 +84,6 @@ func New(cfg Config, db *store.DB) (*Hub, error) {
 	cfg.Bindings = append([]Binding(nil), cfg.Bindings...)
 	for i := range cfg.Bindings {
 		b := &cfg.Bindings[i]
-		if b.FolderIDs != nil {
-			if b.ProjectIDs != nil {
-				return nil, errors.New("configure folder_ids or project_ids, not both")
-			}
-			b.ProjectIDs = b.FolderIDs
-		}
 		if b.UID <= 0 || b.UserID == "" || b.ProfileID == "" || b.ExecutorID == "" || b.Token == "" || seenUID[b.UID] || seenExec[b.ExecutorID] || seenToken[b.Token] {
 			return nil, errors.New("invalid or duplicate binding")
 		}

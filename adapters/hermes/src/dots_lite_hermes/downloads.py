@@ -24,7 +24,7 @@ def materialize_download(payload):
     if size > 8 * 1024 * 1024:
         raise ValueError("Download exceeds the 8 MiB file limit")
     home = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
-    root = Path(os.environ.get("DOTS_DUET_FILES_DIR", home / "dots-duet" / "files"))
+    root = Path(os.environ.get("DOTS_LITE_FILES_DIR", home / "dots-lite" / "files"))
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     if os.name == "posix" and stat.S_IMODE(root.stat().st_mode) & 0o077:
         raise PermissionError("Download directory must be private (mode 700)")

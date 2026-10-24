@@ -18,14 +18,14 @@ async def smoke(options):
     with tempfile.TemporaryDirectory() as directory:
         home = Path(directory)
         os.environ["HERMES_HOME"] = str(home)
-        os.environ["DOTS_DUET_SOCKET"] = str(home / "registration.sock")
+        os.environ["DOTS_LITE_SOCKET"] = str(home / "registration.sock")
         sys.path.insert(0, str(options.hermes_source.absolute()))
         os.chdir(home)
-        (home / "config.yaml").write_text("plugins:\n  enabled: [dots-duet]\n")
+        (home / "config.yaml").write_text("plugins:\n  enabled: [dots-lite]\n")
         plugins = home / "plugins"
         plugins.mkdir()
         import dots_lite_hermes
-        (plugins / "dots-duet").symlink_to(Path(dots_lite_hermes.__file__).parent, target_is_directory=True)
+        (plugins / "dots-lite").symlink_to(Path(dots_lite_hermes.__file__).parent, target_is_directory=True)
         from hermes_cli.plugins import discover_plugins, get_plugin_manager
         from hermes_cli.lifecycle import ainvoke_hook, invoke_hook
         from gateway.session import SessionSource
@@ -46,12 +46,12 @@ async def smoke(options):
                 self.wfile.write(data)
             def log_message(self, *args):
                 pass
-        server = socketserver.UnixStreamServer(os.environ["DOTS_DUET_SOCKET"], Handler)
+        server = socketserver.UnixStreamServer(os.environ["DOTS_LITE_SOCKET"], Handler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
             discover_plugins()
-            if not any(p.get("name") == "dots-duet" and p.get("hooks") == 3 and not p.get("error")
+            if not any(p.get("name") == "dots-lite" and p.get("hooks") == 3 and not p.get("error")
                        for p in get_plugin_manager().list_plugins()):
                 raise RuntimeError("Official PluginManager did not load all three hooks")
             data = b"\x00\xfftrusted-artifact\x80"

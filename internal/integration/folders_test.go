@@ -16,7 +16,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 )
 
-func TestHubRejectsExecutorThatCannotHonorWorkingDirectories(t *testing.T) {
+func TestHubRejectsExecutorWithOutdatedProtocolNames(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	db, err := store.Open(filepath.Join(t.TempDir(), "hub.sqlite"))
@@ -40,9 +40,8 @@ func TestHubRejectsExecutorThatCannotHonorWorkingDirectories(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.CloseNow()
-	// Version 1 executors ignore the working_directory field and would execute
-	// a subfolder task in the authorization root instead.
-	if err := wsjson.Write(ctx, conn, protocol.Frame{Version: 1, Type: "hello", Snapshot: &protocol.Snapshot{InstanceID: "legacy-executor"}}); err != nil {
+	// Version 2 uses obsolete field names and must not join the current protocol.
+	if err := wsjson.Write(ctx, conn, protocol.Frame{Version: 2, Type: "hello", Snapshot: &protocol.Snapshot{InstanceID: "outdated-executor"}}); err != nil {
 		t.Fatal(err)
 	}
 	var reply protocol.Frame

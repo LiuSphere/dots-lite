@@ -31,7 +31,7 @@ class WorkerTests(unittest.TestCase):
 
         hub = Hub()
         with tempfile.TemporaryDirectory() as files:
-            with patch.dict(os.environ, {"DOTS_DUET_FILES_DIR": files}):
+            with patch.dict(os.environ, {"DOTS_LITE_FILES_DIR": files}):
                 self.assertTrue(FollowupWorker(hub, Native()).step())
             receipt = hub.receipts[0]
             self.assertTrue(receipt["acquired"])
@@ -59,7 +59,7 @@ class WorkerTests(unittest.TestCase):
 
         hub = Hub()
         with tempfile.TemporaryDirectory() as files:
-            with patch.dict(os.environ, {"DOTS_DUET_FILES_DIR": files}):
+            with patch.dict(os.environ, {"DOTS_LITE_FILES_DIR": files}):
                 with self.assertRaisesRegex(ValueError, "hash"):
                     FollowupWorker(hub, Native()).step()
             self.assertEqual(list(Path(files).iterdir()), [])

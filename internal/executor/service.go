@@ -19,10 +19,10 @@ import (
 )
 
 type ServiceConfig struct {
-	Scope     protocol.Scope     `json:"scope"`
-	Projects  []protocol.Project `json:"projects"`
-	StatePath string             `json:"state_path"`
-	Native    Options            `json:"-"`
+	Scope     protocol.Scope    `json:"scope"`
+	Folders   []protocol.Folder `json:"folders"`
+	StatePath string            `json:"state_path"`
+	Native    Options           `json:"-"`
 }
 
 type Service struct {
@@ -33,7 +33,7 @@ type Service struct {
 	instance         string
 	roots            map[string]*os.Root
 	taskRoots        map[string]*os.Root
-	projects         map[string]protocol.Project
+	folders          map[string]protocol.Folder
 	cancel           context.CancelFunc
 	pumpDone         chan struct{}
 	nativeErr        error
@@ -57,47 +57,16 @@ func NewService(config ServiceConfig) (*Service, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Service{config: config, db: db, instance: randomID(), roots: map[string]*os.Root{}, taskRoots: map[string]*os.Root{}, projects: map[string]protocol.Project{}, reconciling: map[string]bool{}, reconcilePending: map[string]protocol.Task{}}
+	s := &Service{config: config, db: db, instance: randomID(), roots: map[string]*os.Root{}, taskRoots: map[string]*os.Root{}, folders: map[string]protocol.Folder{}, reconciling: map[string]bool{}, reconcilePending: map[string]protocol.Task{}}
 	for _, statement := range []string{
 		`PRAGMA journal_mode=WAL`, `PRAGMA busy_timeout=5000`,
 		`CREATE TABLE IF NOT EXISTS executor_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
-		`CREATE TABLE IF NOT EXISTS executor_tasks (task_id TEXT PRIMARY KEY, payload TEXT NOT NULL, project_root TEXT NOT NULL, occupied INTEGER NOT NULL DEFAULT 0)`,
+		`CREATE TABLE IF NOT EXISTS executor_tasks (task_id TEXT PRIMARY KEY, payload TEXT NOT NULL, folder_root TEXT NOT NULL, occupied INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE IF NOT EXISTS executor_operations (operation_id TEXT PRIMARY KEY, digest TEXT NOT NULL, result TEXT NOT NULL, action TEXT NOT NULL DEFAULT '')`,
 		`CREATE TABLE IF NOT EXISTS executor_events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS executor_requests (request_id TEXT PRIMARY KEY, payload TEXT NOT NULL, valid INTEGER NOT NULL)`,
 	} {
 		if _, err := db.Exec(statement); err != nil {
-			_ = db.Close()
-			return nil, err
-		}
-	}
-	columns, err := db.Query(`PRAGMA table_info(executor_operations)`)
-	if err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	hasAction := false
-	for columns.Next() {
-		var number, notNull, pk int
-		var name, kind string
-		var defaultValue any
-		if err := columns.Scan(&number, &name, &kind, &notNull, &defaultValue, &pk); err != nil {
-			columns.Close()
-			_ = db.Close()
-			return nil, err
-		}
-		if name == "action" {
-			hasAction = true
-		}
-	}
-	if err := columns.Err(); err != nil {
-		columns.Close()
-		_ = db.Close()
-		return nil, err
-	}
-	columns.Close()
-	if !hasAction {
-		if _, err := db.Exec(`ALTER TABLE executor_operations ADD COLUMN action TEXT NOT NULL DEFAULT ''`); err != nil {
 			_ = db.Close()
 			return nil, err
 		}
@@ -112,14 +81,14 @@ func NewService(config ServiceConfig) (*Service, error) {
 		_ = db.Close()
 		return nil, errors.New("executor database belongs to a different scope")
 	}
-	for _, p := range config.Projects {
+	for _, p := range config.Folders {
 		if p.ID == "" || !filepath.IsAbs(p.Root) {
 			_ = s.Close()
-			return nil, errors.New("project id and absolute root are required")
+			return nil, errors.New("folder id and absolute root are required")
 		}
-		if _, exists := s.projects[p.ID]; exists {
+		if _, exists := s.folders[p.ID]; exists {
 			_ = s.Close()
-			return nil, errors.New("duplicate project id")
+			return nil, errors.New("duplicate folder id")
 		}
 		p.Available = false
 		if p.ApprovalPolicy == "" {
@@ -128,8 +97,8 @@ func NewService(config ServiceConfig) (*Service, error) {
 		if p.Sandbox == "" {
 			p.Sandbox = "workspace-write"
 		}
-		s.projects[p.ID] = p
-		s.projectLocked(p.ID)
+		s.folders[p.ID] = p
+		s.folderLocked(p.ID)
 	}
 	if _, err := db.Exec(`UPDATE executor_requests SET valid=0`); err != nil {
 		_ = s.Close()
@@ -232,7 +201,7 @@ func (s *Service) Execute(ctx context.Context, op protocol.Operation) protocol.R
 	}
 	if op.TaskID != "" && isWriteAction(op.Action) && op.Action != "task.stop" {
 		var uncertain int
-		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM executor_operations WHERE operation_id<>? AND json_extract(result,'$.task_id')=? AND json_extract(result,'$.stage') IN ('unknown','dispatched') AND (action='' OR action IN ('task.create','task.continue','turn.steer','task.stop','goal.set','approval.respond','question.respond','files.upload'))`, op.ID, op.TaskID).Scan(&uncertain); err != nil {
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM executor_operations WHERE operation_id<>? AND json_extract(result,'$.task_id')=? AND json_extract(result,'$.stage') IN ('unknown','dispatched') AND action IN ('task.create','task.continue','turn.steer','task.stop','goal.set','approval.respond','question.respond','files.upload')`, op.ID, op.TaskID).Scan(&uncertain); err != nil {
 			return failResult(result, "storage", err.Error())
 		}
 		if uncertain > 0 {
@@ -283,7 +252,7 @@ func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.R
 		r.Stage, r.Data = "accepted", mustJSON(original)
 		return r
 	}
-	if op.Action == "machine.status" || op.Action == "projects.list" {
+	if op.Action == "machine.status" || op.Action == "folders.list" {
 		state, err := s.Snapshot(ctx)
 		if err != nil {
 			return failResult(r, "storage", err.Error())
@@ -292,13 +261,13 @@ func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.R
 		return r
 	}
 	s.mu.Lock()
-	p, exists := s.projectLocked(op.ProjectID)
+	p, exists := s.folderLocked(op.FolderID)
 	s.mu.Unlock()
 	if !exists {
-		return failResult(r, "project_not_found", "project is not registered")
+		return failResult(r, "folder_not_found", "folder is not registered")
 	}
 	if !p.Available && op.Action != "task.stop" && op.Action != "task.read" && op.Action != "task.history" && op.Action != "goal.get" {
-		return failResult(r, "project_unavailable", "registered project directory is unavailable or no longer matches its authorized open handle")
+		return failResult(r, "folder_unavailable", "registered folder directory is unavailable or no longer matches its authorized open handle")
 	}
 	if op.TaskID != "" && op.Action != "task.create" {
 		s.mu.Lock()
@@ -307,7 +276,7 @@ func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.R
 		if taskErr != nil {
 			return failResult(r, "task_not_found", taskErr.Error())
 		}
-		if task.ProjectID != op.ProjectID {
+		if task.FolderID != op.FolderID {
 			return failResult(r, "forbidden", "task belongs to a different authorized folder")
 		}
 		if err := matchingWorkingDirectory(op, task); err != nil {
@@ -358,7 +327,7 @@ func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.R
 		return failResult(r, "invalid_working_directory", directoryErr.Error())
 	}
 	s.mu.Lock()
-	taskRoot, cwd, directoryErr := s.openTaskRootLocked(op.ProjectID, directory)
+	taskRoot, cwd, directoryErr := s.openTaskRootLocked(op.FolderID, directory)
 	s.mu.Unlock()
 	if directoryErr != nil {
 		return failResult(r, "working_directory_unavailable", directoryErr.Error())
@@ -369,7 +338,7 @@ func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.R
 		}
 	}()
 	now := time.Now().UTC()
-	task := protocol.Task{ID: op.TaskID, Scope: op.Scope, Name: op.Name, Objective: op.Input, ProjectID: op.ProjectID, WorkingDirectory: directory, Version: op.TaskVersion, Execution: "starting", Verification: "pending", Delivery: "pending", Artifacts: op.Artifacts, CreatedAt: now, UpdatedAt: now}
+	task := protocol.Task{ID: op.TaskID, Scope: op.Scope, Name: op.Name, Objective: op.Input, FolderID: op.FolderID, WorkingDirectory: directory, Version: op.TaskVersion, Execution: "starting", Verification: "pending", Delivery: "pending", Artifacts: op.Artifacts, CreatedAt: now, UpdatedAt: now}
 	if task.Version == 0 {
 		task.Version = 1
 	}
@@ -445,7 +414,7 @@ func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.R
 func (s *Service) insertTask(ctx context.Context, task protocol.Task, root string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.QueryContext(ctx, `SELECT project_root FROM executor_tasks WHERE occupied=1`)
+	rows, err := s.db.QueryContext(ctx, `SELECT folder_root FROM executor_tasks WHERE occupied=1`)
 	if err != nil {
 		return err
 	}
@@ -457,7 +426,7 @@ func (s *Service) insertTask(ctx context.Context, task protocol.Task, root strin
 		}
 		if rootsOverlap(root, other) {
 			rows.Close()
-			return errors.New("project is occupied by an active or uncertain task")
+			return errors.New("folder is occupied by an active or uncertain task")
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -465,7 +434,7 @@ func (s *Service) insertTask(ctx context.Context, task protocol.Task, root strin
 		return err
 	}
 	rows.Close()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO executor_tasks(task_id,payload,project_root,occupied) VALUES(?,?,?,1)`, task.ID, string(mustJSON(task)), root)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO executor_tasks(task_id,payload,folder_root,occupied) VALUES(?,?,?,1)`, task.ID, string(mustJSON(task)), root)
 	return err
 }
 func rootsOverlap(a, b string) bool { return pathWithin(a, b) || pathWithin(b, a) }
@@ -544,7 +513,7 @@ func (s *Service) Snapshot(ctx context.Context) (protocol.Snapshot, error) {
 	s.mu.Lock()
 	native, instance := s.client, s.instance
 	s.mu.Unlock()
-	state := protocol.Snapshot{InstanceID: instance, Initialized: native != nil && native.Err() == nil, Projects: []protocol.Project{}, Tasks: []protocol.Task{}}
+	state := protocol.Snapshot{InstanceID: instance, Initialized: native != nil && native.Err() == nil, Folders: []protocol.Folder{}, Tasks: []protocol.Task{}}
 	s.mu.Lock()
 	if s.nativeErr != nil {
 		state.Error = s.nativeErr.Error()
@@ -552,9 +521,9 @@ func (s *Service) Snapshot(ctx context.Context) (protocol.Snapshot, error) {
 	if s.eventFault != nil {
 		state.Initialized = false
 	}
-	for id := range s.projects {
-		p, _ := s.projectLocked(id)
-		state.Projects = append(state.Projects, p)
+	for id := range s.folders {
+		p, _ := s.folderLocked(id)
+		state.Folders = append(state.Folders, p)
 	}
 	s.mu.Unlock()
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM executor_tasks ORDER BY task_id`)
@@ -579,8 +548,8 @@ func (s *Service) Snapshot(ctx context.Context) (protocol.Snapshot, error) {
 // An open root stays bound to the directory first authorized by registration.
 // If its path is replaced, keep the handle and report unavailability rather
 // than silently authorizing the replacement directory.
-func (s *Service) projectLocked(id string) (protocol.Project, bool) {
-	p, exists := s.projects[id]
+func (s *Service) folderLocked(id string) (protocol.Folder, bool) {
+	p, exists := s.folders[id]
 	if !exists {
 		return p, false
 	}

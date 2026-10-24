@@ -36,7 +36,6 @@ type queryArgs struct {
 	Query       string `json:"query"`
 	TaskID      string `json:"task_id,omitempty"`
 	OperationID string `json:"operation_id,omitempty"`
-	ProjectID   string `json:"project_id,omitempty"`
 	FolderID    string `json:"folder_id,omitempty"`
 	Path        string `json:"path,omitempty"`
 	Offset      int64  `json:"offset,omitempty"`
@@ -46,7 +45,6 @@ type queryArgs struct {
 type prepareArgs struct {
 	Action           string           `json:"action"`
 	TaskID           string           `json:"task_id,omitempty"`
-	ProjectID        string           `json:"project_id,omitempty"`
 	FolderID         string           `json:"folder_id,omitempty"`
 	WorkingDirectory string           `json:"working_directory,omitempty"`
 	Input            string           `json:"input,omitempty"`
@@ -70,8 +68,8 @@ func decodeArgs(raw json.RawMessage, v any) error {
 	}
 	return nil
 }
-func allowedProject(b Binding, id string) bool {
-	for _, p := range b.ProjectIDs {
+func allowedFolder(b Binding, id string) bool {
+	for _, p := range b.FolderIDs {
 		if p == id {
 			return true
 		}
@@ -104,9 +102,6 @@ func (h *Hub) query(ctx context.Context, b Binding, raw json.RawMessage) (json.R
 		return nil, err
 	}
 	var err error
-	if a.ProjectID, err = folderID(a.ProjectID, a.FolderID); err != nil {
-		return nil, err
-	}
 	if a.Query == "machine" {
 		return json.Marshal(h.machine(b))
 	}
@@ -212,9 +207,6 @@ func (h *Hub) prepare(ctx context.Context, b Binding, inv *invocation, raw json.
 		return nil, err
 	}
 	var err error
-	if a.ProjectID, err = folderID(a.ProjectID, a.FolderID); err != nil {
-		return nil, err
-	}
 	if a.WorkingDirectory != "" && !validWorkingDirectory(a.WorkingDirectory) {
 		return nil, failure("invalid_arguments", "working_directory must be a relative slash-separated path inside the authorized folder")
 	}
@@ -257,10 +249,10 @@ func (h *Hub) prepare(ctx context.Context, b Binding, inv *invocation, raw json.
 		now := time.Now().UTC()
 		var task taskRecord
 		if a.Action == "task.create" {
-			if !allowedProject(b, a.ProjectID) {
-				return failure("forbidden", "project is not authorized")
+			if !allowedFolder(b, a.FolderID) {
+				return failure("forbidden", "folder is not authorized")
 			}
-			task = taskRecord{Task: protocol.Task{ID: taskID, Scope: b.scope(), Name: a.Name, Objective: a.Input, ProjectID: a.ProjectID, WorkingDirectory: workingDirectory(a.WorkingDirectory), Version: 1, Execution: "prepared", Verification: "pending", Delivery: "pending", Artifacts: a.Artifacts, CreatedAt: now, UpdatedAt: now}, Source: source}
+			task = taskRecord{Task: protocol.Task{ID: taskID, Scope: b.scope(), Name: a.Name, Objective: a.Input, FolderID: a.FolderID, WorkingDirectory: workingDirectory(a.WorkingDirectory), Version: 1, Execution: "prepared", Verification: "pending", Delivery: "pending", Artifacts: a.Artifacts, CreatedAt: now, UpdatedAt: now}, Source: source}
 			if task.Name == "" {
 				task.Name = taskID
 			}
@@ -270,8 +262,8 @@ func (h *Hub) prepare(ctx context.Context, b Binding, inv *invocation, raw json.
 			if err != nil {
 				return err
 			}
-			if a.ProjectID != "" && a.ProjectID != task.ProjectID {
-				return failure("forbidden", "task project cannot be changed")
+			if a.FolderID != "" && a.FolderID != task.FolderID {
+				return failure("forbidden", "task folder cannot be changed")
 			}
 			if a.WorkingDirectory != "" && a.WorkingDirectory != workingDirectory(task.WorkingDirectory) {
 				return failure("forbidden", "task working directory cannot be changed")
@@ -289,11 +281,11 @@ func (h *Hub) prepare(ctx context.Context, b Binding, inv *invocation, raw json.
 			if err := json.Unmarshal(r, &old); err != nil {
 				return err
 			}
-			if (old.Stage == "unknown" || old.Stage == "dispatched") && (old.TaskID == taskID || old.ProjectID == task.ProjectID) {
+			if (old.Stage == "unknown" || old.Stage == "dispatched") && (old.TaskID == taskID || old.FolderID == task.FolderID) {
 				return failure("unknown_conflict", "an earlier operation needs reconciliation")
 			}
 		}
-		o = operationRecord{Operation: protocol.Operation{ID: id, TaskID: taskID, Scope: b.scope(), TaskVersion: task.Version, ProjectID: task.ProjectID, WorkingDirectory: task.WorkingDirectory, Action: a.Action, ThreadID: task.ThreadID, ExpectedTurnID: a.ExpectedTurnID, Input: a.Input, Name: a.Name, Goal: a.Goal, OutputSchema: a.OutputSchema, Artifacts: a.Artifacts, Upload: upload, InputFiles: inputs}, Source: source, Stage: "prepared", CreatedAt: now, UpdatedAt: now}
+		o = operationRecord{Operation: protocol.Operation{ID: id, TaskID: taskID, Scope: b.scope(), TaskVersion: task.Version, FolderID: task.FolderID, WorkingDirectory: task.WorkingDirectory, Action: a.Action, ThreadID: task.ThreadID, ExpectedTurnID: a.ExpectedTurnID, Input: a.Input, Name: a.Name, Goal: a.Goal, OutputSchema: a.OutputSchema, Artifacts: a.Artifacts, Upload: upload, InputFiles: inputs}, Source: source, Stage: "prepared", CreatedAt: now, UpdatedAt: now}
 		if err := tx.Put("task", owner(b.scope()), taskID, task); err != nil {
 			return err
 		}

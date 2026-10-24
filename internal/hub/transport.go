@@ -53,7 +53,7 @@ func (h *Hub) machine(b Binding) map[string]any {
 	s := h.sessions[b.ExecutorID]
 	h.mu.Unlock()
 	if s == nil {
-		return map[string]any{"connected": false, "snapshot": publicSnapshot(protocol.Snapshot{Initialized: false, Projects: []protocol.Project{}, Tasks: []protocol.Task{}}, b)}
+		return map[string]any{"connected": false, "snapshot": publicSnapshot(protocol.Snapshot{Initialized: false, Folders: []protocol.Folder{}, Tasks: []protocol.Task{}}, b)}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

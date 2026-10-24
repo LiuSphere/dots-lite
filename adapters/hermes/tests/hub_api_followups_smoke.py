@@ -30,7 +30,7 @@ async def smoke(options):
     }
     params = StdioServerParameters(
         command=sys.executable, args=["-m", "dots_lite_hermes"],
-        env={**os.environ, "DOTS_DUET_SOCKET": options.socket},
+        env={**os.environ, "DOTS_LITE_SOCKET": options.socket},
     )
     async with asyncio.timeout(20):
         async with stdio_client(params) as streams:

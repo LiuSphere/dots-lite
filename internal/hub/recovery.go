@@ -108,7 +108,7 @@ func (h *Hub) reconcileOperation(ctx context.Context, b Binding, id string) erro
 	if err != nil {
 		return err
 	}
-	result, err := h.dispatch(ctx, b, protocol.Operation{ID: queryID, TaskID: op.TaskID, Scope: b.scope(), TaskVersion: op.TaskVersion, ProjectID: op.ProjectID, WorkingDirectory: op.WorkingDirectory, Action: "operation.read", RequestID: op.ID})
+	result, err := h.dispatch(ctx, b, protocol.Operation{ID: queryID, TaskID: op.TaskID, Scope: b.scope(), TaskVersion: op.TaskVersion, FolderID: op.FolderID, WorkingDirectory: op.WorkingDirectory, Action: "operation.read", RequestID: op.ID})
 	if err != nil {
 		return h.saveReconciliationError(ctx, b, op.ID, &protocol.Error{Code: "reconciliation_failed", Message: err.Error()})
 	}

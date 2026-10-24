@@ -79,7 +79,7 @@ func deliveryFixture(t *testing.T) (*hub.Hub, string, string) {
 	var ids struct {
 		TaskID string `json:"task_id"`
 	}
-	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"make verified report","name":"report"}`), &ids); err != nil {
+	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"make verified report","name":"report"}`), &ids); err != nil {
 		t.Fatal(err)
 	}
 	return h, path, ids.TaskID
@@ -175,7 +175,7 @@ func TestAcquiredArtifactNeedsSeparateVerifiedNativeMediaReceipt(t *testing.T) {
 	var ids struct {
 		TaskID string `json:"task_id"`
 	}
-	if err = json.Unmarshal(invoke("dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"deliver report","artifacts":["out.txt"]}`), &ids); err != nil {
+	if err = json.Unmarshal(invoke("dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"deliver report","artifacts":["out.txt"]}`), &ids); err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(h.WebsocketHandler())
@@ -405,7 +405,7 @@ func TestNativeQuestionsReachHermesBeforeAnyUserNotice(t *testing.T) {
 		t.Run(method, func(t *testing.T) {
 			ctx, h, conn, taskID := connectedHubFixture(t, 2)
 			event := protocol.Event{Sequence: 1, TaskID: taskID, InstanceID: "retry-instance", Type: method,
-				Data: json.RawMessage(`{"request_id":"question-1","instance_id":"retry-instance","params":{"question":"Which project formatter is already configured?"}}`), CreatedAt: time.Now()}
+				Data: json.RawMessage(`{"request_id":"question-1","instance_id":"retry-instance","params":{"question":"Which folder formatter is already configured?"}}`), CreatedAt: time.Now()}
 			if err := wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "event", Event: &event}); err != nil {
 				t.Fatal(err)
 			}
@@ -425,7 +425,7 @@ func TestNativeQuestionsReachHermesBeforeAnyUserNotice(t *testing.T) {
 			if f.ID == "" || f.TaskID != taskID {
 				t.Fatalf("question was not offered to its Hermes task: %s", raw)
 			}
-			args := json.RawMessage(`{"task_id":"` + taskID + `","kind":"followup","status":"waiting_user","evidence":{"reason":"The project has two valid formatters and needs the user's choice."}}`)
+			args := json.RawMessage(`{"task_id":"` + taskID + `","kind":"followup","status":"waiting_user","evidence":{"reason":"The folder has two valid formatters and needs the user's choice."}}`)
 			ref, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "dots_lite_record", Arguments: args,
 				Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: f.SessionID, SessionID: "question-session", NativeTaskID: "diagnose-question", ToolCallID: "needs-choice"}})
 			if err != nil {
@@ -435,7 +435,7 @@ func TestNativeQuestionsReachHermesBeforeAnyUserNotice(t *testing.T) {
 				t.Fatal(err)
 			}
 			notice, err = h.NextDelivery(ctx, 1001)
-			if err != nil || !strings.Contains(string(notice), "The project has two valid formatters") {
+			if err != nil || !strings.Contains(string(notice), "The folder has two valid formatters") {
 				t.Fatalf("confirmed user decision did not notify original chat: %s %v", notice, err)
 			}
 		})

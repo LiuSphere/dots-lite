@@ -74,7 +74,7 @@ func connectedHubFixture(t *testing.T, budget int) (context.Context, *hub.Hub, *
 	var ids struct {
 		TaskID string `json:"task_id"`
 	}
-	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"verify report"}`), &ids); err != nil {
+	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"verify report"}`), &ids); err != nil {
 		t.Fatal(err)
 	}
 	return ctx, h, conn, ids.TaskID

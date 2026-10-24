@@ -24,7 +24,7 @@ func TestToolCallsRequireRegisteredMatchingSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	h, err := hub.New(hub.Config{Bindings: []hub.Binding{{UID: 1001, UserID: "a", ProfileID: "a", ExecutorID: "pc-a", Token: "token-a", ProjectIDs: []string{"demo"}, Sources: []hub.AllowedSource{{Platform: "test", SenderID: "sender-a", ChatID: "chat-a"}}}}}, db)
+	h, err := hub.New(hub.Config{Bindings: []hub.Binding{{UID: 1001, UserID: "a", ProfileID: "a", ExecutorID: "pc-a", Token: "token-a", FolderIDs: []string{"demo"}, Sources: []hub.AllowedSource{{Platform: "test", SenderID: "sender-a", ChatID: "chat-a"}}}}}, db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestOfflineStopPersistsPauseAndInvalidatesPreparedWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"make report"}`)
+	prepared := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"make report"}`)
 	var ids struct {
 		TaskID      string `json:"task_id"`
 		OperationID string `json:"operation_id"`
@@ -166,7 +166,7 @@ func TestEmptyResultEvidenceCannotMarkVerificationOrDeliveryComplete(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"make report"}`)
+	prepared := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"make report"}`)
 	var ids struct {
 		TaskID string `json:"task_id"`
 	}
@@ -225,7 +225,7 @@ func TestStopConfirmationUsesVersionedNativePauseReceipt(t *testing.T) {
 			var ids struct {
 				TaskID string `json:"task_id"`
 			}
-			if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"finish then pause"}`), &ids); err != nil {
+			if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"finish then pause"}`), &ids); err != nil {
 				t.Fatal(err)
 			}
 			done := make(chan error, 1)
@@ -281,7 +281,7 @@ func TestTerminalEventBeforeReceiptDoesNotRegressTaskToRunning(t *testing.T) {
 	if err = wsjson.Read(ctx, conn, &ack); err != nil {
 		t.Fatal(err)
 	}
-	prepared := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"fast task"}`)
+	prepared := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"fast task"}`)
 	var ids struct {
 		TaskID      string `json:"task_id"`
 		OperationID string `json:"operation_id"`
@@ -360,7 +360,7 @@ func TestAutomaticArtifactTransferRequiresMatchingScopeAndReceipt(t *testing.T) 
 	if err = wsjson.Read(ctx, conn, &ack); err != nil {
 		t.Fatal(err)
 	}
-	prepared := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"make report","artifacts":["out.txt"]}`)
+	prepared := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"make report","artifacts":["out.txt"]}`)
 	var ids struct {
 		TaskID string `json:"task_id"`
 	}
@@ -471,7 +471,7 @@ func TestPreparedTaskSurvivesRestartAndStaysInsideItsScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"write a report","name":"report"}`)
+	created := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"write a report","name":"report"}`)
 	var prepared struct {
 		TaskID      string `json:"task_id"`
 		OperationID string `json:"operation_id"`
@@ -548,7 +548,7 @@ func TestEventReplayIsIdempotentButGapsAndChangedContentAreRejected(t *testing.T
 			var ids struct {
 				TaskID string `json:"task_id"`
 			}
-			if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"inspect events"}`), &ids); err != nil {
+			if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"inspect events"}`), &ids); err != nil {
 				t.Fatal(err)
 			}
 			event := protocol.Event{Sequence: 1, TaskID: ids.TaskID, InstanceID: "event-instance", Type: "turn/completed", Data: json.RawMessage(`{"turn":{"id":"turn-a","status":"completed"}}`), CreatedAt: time.Now()}
@@ -595,7 +595,7 @@ func TestUploadUsesPreparedTaskScopeAndRejectsChangedContent(t *testing.T) {
 	var ids struct {
 		TaskID string `json:"task_id"`
 	}
-	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"read attachment"}`), &ids); err != nil {
+	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"read attachment"}`), &ids); err != nil {
 		t.Fatal(err)
 	}
 	valid := `{"action":"files.upload","task_id":"` + ids.TaskID + `","upload":{"name":"input.txt","data_base64":"YWJj","size":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}}`
@@ -659,7 +659,7 @@ func TestReconcileFindsMissingTerminalEventWithoutReplayingWrite(t *testing.T) {
 		TaskID      string `json:"task_id"`
 		OperationID string `json:"operation_id"`
 	}
-	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"finish report"}`), &ids); err != nil {
+	if err = json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"finish report"}`), &ids); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
@@ -741,14 +741,14 @@ func TestSubmitDispatchesOnceAndKeepsNativeExecutionSeparateFromVerification(t *
 		t.Fatal(err)
 	}
 	defer conn.CloseNow()
-	if err := wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "hello", Snapshot: &protocol.Snapshot{InstanceID: "instance-a", Initialized: true, Projects: []protocol.Project{{ID: "demo", Available: true}}}}); err != nil {
+	if err := wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "hello", Snapshot: &protocol.Snapshot{InstanceID: "instance-a", Initialized: true, Folders: []protocol.Folder{{ID: "demo", Available: true}}}}); err != nil {
 		t.Fatal(err)
 	}
 	var ack protocol.Frame
 	if err := wsjson.Read(ctx, conn, &ack); err != nil {
 		t.Fatal(err)
 	}
-	prepared := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"make report"}`)
+	prepared := call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"make report"}`)
 	var ids struct {
 		TaskID      string `json:"task_id"`
 		OperationID string `json:"operation_id"`
@@ -765,7 +765,7 @@ func TestSubmitDispatchesOnceAndKeepsNativeExecutionSeparateFromVerification(t *
 			peerDone <- fmt.Errorf("unexpected operation: %+v", f)
 			return
 		}
-		task := protocol.Task{ID: ids.TaskID, Scope: protocol.Scope{UserID: "a", ProfileID: "a", ExecutorID: "pc-a"}, ProjectID: "demo", ThreadID: "thread-a", TurnID: "turn-a", Version: 1, Execution: "running"}
+		task := protocol.Task{ID: ids.TaskID, Scope: protocol.Scope{UserID: "a", ProfileID: "a", ExecutorID: "pc-a"}, FolderID: "demo", ThreadID: "thread-a", TurnID: "turn-a", Version: 1, Execution: "running"}
 		data, _ := json.Marshal(task)
 		peerDone <- wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "result", ID: f.ID, Result: &protocol.Result{OperationID: ids.OperationID, TaskID: ids.TaskID, Stage: "accepted", ThreadID: "thread-a", TurnID: "turn-a", Data: data}})
 	}()
@@ -885,8 +885,8 @@ func TestSubmitDispatchesOnceAndKeepsNativeExecutionSeparateFromVerification(t *
 
 func testConfig() hub.Config {
 	return hub.Config{Bindings: []hub.Binding{
-		{UID: 1001, UserID: "a", ProfileID: "a", ExecutorID: "pc-a", Token: "token-a", ProjectIDs: []string{"demo"}, Sources: []hub.AllowedSource{{Platform: "test", SenderID: "sender-a", ChatID: "chat-a"}}},
-		{UID: 1002, UserID: "b", ProfileID: "b", ExecutorID: "pc-b", Token: "token-b", ProjectIDs: []string{"demo"}, Sources: []hub.AllowedSource{{Platform: "test", SenderID: "sender-b", ChatID: "chat-b"}}},
+		{UID: 1001, UserID: "a", ProfileID: "a", ExecutorID: "pc-a", Token: "token-a", FolderIDs: []string{"demo"}, Sources: []hub.AllowedSource{{Platform: "test", SenderID: "sender-a", ChatID: "chat-a"}}},
+		{UID: 1002, UserID: "b", ProfileID: "b", ExecutorID: "pc-b", Token: "token-b", FolderIDs: []string{"demo"}, Sources: []hub.AllowedSource{{Platform: "test", SenderID: "sender-b", ChatID: "chat-b"}}},
 	}}
 }
 func registered(t *testing.T, h *hub.Hub, uid int, tool, args string) protocol.ToolRequest {

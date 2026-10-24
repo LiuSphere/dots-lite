@@ -15,8 +15,8 @@ func (s *Service) taskOperation(ctx context.Context, op protocol.Operation, clie
 	if err != nil {
 		return failResult(r, "task_not_found", err.Error())
 	}
-	if task.ProjectID != op.ProjectID || (op.ThreadID != "" && op.ThreadID != task.ThreadID) {
-		return failResult(r, "forbidden", "task project or thread does not match")
+	if task.FolderID != op.FolderID || (op.ThreadID != "" && op.ThreadID != task.ThreadID) {
+		return failResult(r, "forbidden", "task folder or thread does not match")
 	}
 	r.ThreadID, r.TurnID = task.ThreadID, task.TurnID
 	readonly := op.Action == "task.read" || op.Action == "task.history" || op.Action == "goal.get"
@@ -146,11 +146,11 @@ func (s *Service) taskOperation(ctx context.Context, op protocol.Operation, clie
 			return failResult(r, "conflict", err.Error())
 		}
 		s.mu.Lock()
-		p, _ := s.projectLocked(task.ProjectID)
+		p, _ := s.folderLocked(task.FolderID)
 		_, cwd, directoryErr := s.taskRootLocked(ctx, task)
 		s.mu.Unlock()
 		if !p.Available {
-			return failResult(r, "project_unavailable", "registered project directory is unavailable")
+			return failResult(r, "folder_unavailable", "registered folder directory is unavailable")
 		}
 		if directoryErr != nil {
 			return failResult(r, "working_directory_unavailable", directoryErr.Error())
@@ -211,9 +211,9 @@ func (s *Service) taskOperation(ctx context.Context, op protocol.Operation, clie
 func (s *Service) claimTask(ctx context.Context, task protocol.Task) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	p, exists := s.projectLocked(task.ProjectID)
+	p, exists := s.folderLocked(task.FolderID)
 	if !exists || !p.Available {
-		return errors.New("registered project directory is unavailable")
+		return errors.New("registered folder directory is unavailable")
 	}
 	_, cwd, directoryErr := s.taskRootLocked(ctx, task)
 	if directoryErr != nil {
@@ -224,9 +224,9 @@ func (s *Service) claimTask(ctx context.Context, task protocol.Task) error {
 		return err
 	}
 	if latest.Version != task.Version || latest.Paused != task.Paused {
-		return errors.New("task was paused or replaced before its project could be claimed")
+		return errors.New("task was paused or replaced before its folder could be claimed")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT project_root FROM executor_tasks WHERE occupied=1 AND task_id<>?`, task.ID)
+	rows, err := s.db.QueryContext(ctx, `SELECT folder_root FROM executor_tasks WHERE occupied=1 AND task_id<>?`, task.ID)
 	if err != nil {
 		return err
 	}
@@ -238,7 +238,7 @@ func (s *Service) claimTask(ctx context.Context, task protocol.Task) error {
 		}
 		if rootsOverlap(cwd, other) {
 			rows.Close()
-			return errors.New("project is occupied by another task")
+			return errors.New("folder is occupied by another task")
 		}
 	}
 	if err := rows.Err(); err != nil {

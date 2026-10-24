@@ -47,6 +47,9 @@ func TestFolderCreateKeepsWorkingDirectoryAndOriginalInvocation(t *testing.T) {
 		if got["folder_id"] != "demo" || got["working_directory"] != "reports/monthly" {
 			t.Fatalf("folder or directory was lost: %v", got)
 		}
+		if _, present := got["project_id"]; present {
+			t.Fatal("obsolete project_id was exposed")
+		}
 	}
 }
 
@@ -62,8 +65,8 @@ func TestFolderQueriesListOnlyAuthorizedFolders(t *testing.T) {
 	}
 	defer h.Close()
 	connectFolderExecutor(t, h)
-	for _, query := range []string{"folders", "projects"} {
-		var folders []protocol.Project
+	for _, query := range []string{"folders"} {
+		var folders []protocol.Folder
 		if err := json.Unmarshal(call(t, h, 1001, "dots_lite_query", `{"query":"`+query+`"}`), &folders); err != nil {
 			t.Fatal(err)
 		}
@@ -73,7 +76,7 @@ func TestFolderQueriesListOnlyAuthorizedFolders(t *testing.T) {
 	}
 	var machine struct {
 		Snapshot struct {
-			Folders []protocol.Project `json:"folders"`
+			Folders []protocol.Folder `json:"folders"`
 		} `json:"snapshot"`
 	}
 	if err := json.Unmarshal(call(t, h, 1001, "dots_lite_query", `{"query":"machine"}`), &machine); err != nil {
@@ -95,7 +98,7 @@ func connectFolderExecutor(t *testing.T, h *hub.Hub) (*websocket.Conn, context.C
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.CloseNow(); cancel() })
-	if err := wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "hello", Snapshot: &protocol.Snapshot{InstanceID: "folder-interface", Initialized: true, Projects: []protocol.Project{{ID: "demo", Root: "C:/authorized", Available: true}, {ID: "hidden", Root: "C:/private", Available: true}}}}); err != nil {
+	if err := wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "hello", Snapshot: &protocol.Snapshot{InstanceID: "folder-interface", Initialized: true, Folders: []protocol.Folder{{ID: "demo", Root: "C:/authorized", Available: true}, {ID: "hidden", Root: "C:/private", Available: true}}}}); err != nil {
 		t.Fatal(err)
 	}
 	var ack protocol.Frame
@@ -144,7 +147,7 @@ func TestFolderDirectoryBrowseRequiresExplicitAuthorizedFolder(t *testing.T) {
 	}
 	select {
 	case op := <-seen:
-		if op.TaskID != "" || op.ProjectID != "demo" || op.Action != "files.list" || op.Path != "." {
+		if op.TaskID != "" || op.FolderID != "demo" || op.Action != "files.list" || op.Path != "." {
 			t.Fatalf("unexpected browse operation: %+v", op)
 		}
 	case <-ctx.Done():
@@ -229,11 +232,11 @@ func TestFolderDirectoryAndInvocationStayFixedAcrossRetriesAndRestart(t *testing
 			t.Fatalf("task directory changed or escaped: %q", directory)
 		}
 	}
-	for _, fields := range []string{``, `,"working_directory":"nested"`, `,"folder_id":"demo","project_id":"demo","working_directory":"nested"`} {
+	for _, fields := range []string{``, `,"working_directory":"nested"`, `,"folder_id":"demo","working_directory":"nested"`} {
 		call(t, h, 1001, "dots_lite_prepare", `{"action":"task.continue","task_id":"`+created.TaskID+`","input":"continue"`+fields+`}`)
 	}
-	if _, err := h.Call(context.Background(), 1001, registered(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","project_id":"other","input":"work"}`)); err == nil {
-		t.Fatal("conflicting folder aliases were accepted")
+	if _, err := h.Call(context.Background(), 1001, registered(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","folder_id":"other","input":"work"}`)); err == nil {
+		t.Fatal("obsolete project_id argument was accepted")
 	}
 	if err := h.Close(); err != nil {
 		t.Fatal(err)
@@ -258,7 +261,7 @@ func TestFolderDirectoryAndInvocationStayFixedAcrossRetriesAndRestart(t *testing
 	var rootTask struct {
 		TaskID string `json:"task_id"`
 	}
-	if err := json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"legacy root task"}`), &rootTask); err != nil {
+	if err := json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"root task"}`), &rootTask); err != nil {
 		t.Fatal(err)
 	}
 	var root struct {
@@ -292,8 +295,8 @@ func TestFolderCreateRejectsOutsideOrUncleanDirectory(t *testing.T) {
 	}
 }
 
-func TestFolderBindingAliasAuthorizesCreateAndRejectsCombinedLists(t *testing.T) {
-	for _, fields := range []string{`"folder_ids":["demo"]`, `"folder_ids":["demo"],"project_ids":["other"]`} {
+func TestFolderBindingAuthorizesCreateAcrossRestart(t *testing.T) {
+	for _, fields := range []string{`"folder_ids":["demo"]`} {
 		t.Run(fields, func(t *testing.T) {
 			db, err := store.Open(filepath.Join(t.TempDir(), "hub.db"))
 			if err != nil {
@@ -305,13 +308,6 @@ func TestFolderBindingAliasAuthorizesCreateAndRejectsCombinedLists(t *testing.T)
 				t.Fatal(err)
 			}
 			h, err := hub.New(cfg, db)
-			if fields != `"folder_ids":["demo"]` {
-				if err == nil {
-					h.Close()
-					t.Fatal("combined authorization lists were accepted")
-				}
-				return
-			}
 			if err != nil {
 				t.Fatal(err)
 			}

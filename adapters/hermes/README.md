@@ -15,11 +15,11 @@ uv run --project adapters/hermes python -m unittest discover -s adapters/hermes/
 
 发行包使用 Python `>=3.14,<3.15` 与 `mcp==2.0.0`。Windows 不支持本包要求的 UID Unix socket；其 socket 集成测试明确跳过，须在 Linux 运行。
 
-为每个隔离 Linux UID 配置独立的 `DOTS_DUET_SOCKET`。Hermes 原生 MCP 配置的服务器名必须为 `dots_lite`，命令为该包环境的 `python -m dots_lite_hermes`。标准输出只传 MCP 消息。不要把 socket 路径、profile 身份或调用引用交给模型选择。
+为每个隔离 Linux UID 配置独立的 `DOTS_LITE_SOCKET`。Hermes 原生 MCP 配置的服务器名必须为 `dots_lite`，命令为该包环境的 `python -m dots_lite_hermes`。标准输出只传 MCP 消息。不要把 socket 路径、profile 身份或调用引用交给模型选择。
 
-从 v0.2.0 起，MCP 配置键为 `dots_lite`，七个工具统一使用 `dots_lite_*`，旧工具名不再接受。升级时把原 `dots_duet` 配置项重命名为 `dots_lite`，同步更新工具筛选项、Hub、适配包和来源插件，再重启目标 profile。保留其他 MCP 配置；不要并列注册新旧两项。`DOTS_DUET_*` 环境变量、数据目录、配对凭据和数据库继续沿用。
+v0.3.0 只接受当前名称：MCP 配置键 `dots_lite`、工具前缀 `dots_lite_*`、插件名 `dots-lite`、环境变量 `DOTS_LITE_SOCKET` 和 `DOTS_LITE_FILES_DIR`。默认文件目录为 `$HERMES_HOME/dots-lite/files`。配置和工具只使用 folders/folder_ids/folder_id。更新前离线转换现有配置与状态，随后同步切换两端服务；不提供旧名称回退。
 
-来源插件所在的 Hermes 网关父进程也必须配置 `DOTS_DUET_SOCKET`，不能只设置 MCP 子进程的 env。网关、MCP 和 worker 使用同一 profile UID、HOME、HERMES_HOME 与 DOTS_DUET_FILES_DIR；socket 可由同一个 Hub 提供，再按真实对端 UID 授权。
+来源插件所在的 Hermes 网关父进程也必须配置 `DOTS_LITE_SOCKET`，不能只设置 MCP 子进程的 env。网关、MCP 和 worker 使用同一 profile UID、HOME、HERMES_HOME 与 DOTS_LITE_FILES_DIR；socket 可由同一个 Hub 提供，再按真实对端 UID 授权。
 
 把 `src/dots_lite_hermes/` 作为 Hermes 官方目录插件加载。`plugin.yaml` 声明 `pre_gateway_dispatch`、`post_gateway_admission` 与 `pre_tool_call`，`__init__.py` 是注册入口。插件仅使用标准库，不要求把 MCP SDK 安装进 Hermes 的 Python 环境。插件必须运行在原生消息任务内；缺少当前绑定或可信来源时明确阻止调用。
 
@@ -37,7 +37,7 @@ python -m dots_lite_hermes worker --socket /run/duet/profile.sock --api-url http
 
 `dots_lite_query(query="task")` 返回业务任务；`query="session"` 返回当前原生会话、任务与待处理请求；`query="goal"` 返回真实原生 Goal。核验线程是否静止以及是否仍有 active Goal 时，读取后两项，不从业务快照推测。
 
-输入附件使用 `dots_lite_prepare(action="task.create",inputs=[{name,local_path}],...)`，或 `dots_lite_prepare(action="files.upload",task_id=...,upload={name,local_path})`，取得 operation ID 后再 `dots_lite_submit`。模型只传当前消息附件的路径引用。名称只允许 basename，支持空文件，总量最大 8 MiB。执行端将附件写入任务的 `.dots-duet/attachments/<task-id>/<name>`，拒绝覆盖；prepare 本身不写文件。Hub 与执行端继续校验内容哈希、实际大小和任务归属。
+输入附件使用 `dots_lite_prepare(action="task.create",inputs=[{name,local_path}],...)`，或 `dots_lite_prepare(action="files.upload",task_id=...,upload={name,local_path})`，取得 operation ID 后再 `dots_lite_submit`。模型只传当前消息附件的路径引用。名称只允许 basename，支持空文件，总量最大 8 MiB。执行端将附件写入任务的 `.dots-lite/attachments/<task-id>/<name>`，拒绝覆盖；prepare 本身不写文件。Hub 与执行端继续校验内容哈希、实际大小和任务归属。
 
 pre-dispatch 只收集该消息的原生媒体路径，不能授予读取权。post-admission 经 Hermes 授权后，按平台、发送者、聊天、线程、profile、scope、父聊天及 message ID 精确配对；从官方媒体缓存逐级用不跟随符号链接的句柄读取稳定快照。原始路径与官方内容寻址保留路径均只绑定该条消息。工具调用还须匹配当前原生 session key 和消息。重启后登记丢失则拒绝；不会扩大到整个 HERMES_HOME。字节只进入私有 Invocation.attachment_files HTTP body，不进入 hook 修改参数、模型输入或公开 operation 结果。
 
@@ -51,7 +51,7 @@ API 后台来源的 `chat_id` 为预先绑定的 API session 根，`session_id` 
 
 ## 文件与跟进结果
 
-`dots_lite_query(query="download")` 对收到的 Base64、返回字节数和 SHA-256 进行校验，再写入本 profile 私有目录。默认目录为 `$HERMES_HOME/dots-duet/files`，可用 `DOTS_DUET_FILES_DIR` 配置。Linux 目录须为 700，文件为 600。写入后重新读取核对哈希。
+`dots_lite_query(query="download")` 对收到的 Base64、返回字节数和 SHA-256 进行校验，再写入本 profile 私有目录。默认目录为 `$HERMES_HOME/dots-lite/files`，可用 `DOTS_LITE_FILES_DIR` 配置。Linux 目录须为 700，文件为 600。写入后重新读取核对哈希。
 
 返回结果包含实际 `local_path`，不含 `data_base64`。单文件上限为 8 MiB。只有 offset 为 0、字节数等于全文件大小且 `truncated=false` 才报告 `acquired=complete`；部分范围报告 `partial`。文件获取与微信附件交付是两个状态，私有副本不证明已送到微信。
 

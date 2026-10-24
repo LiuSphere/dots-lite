@@ -17,19 +17,19 @@ import (
 )
 
 // This opt-in check uses the installed Codex account and a real model turn.
-// Ordinary go test never starts a model or writes to an existing project.
+// Ordinary go test never starts a model or writes to an existing folder.
 func TestRealCodexWritesAndDownloadsArtifact(t *testing.T) {
-	if os.Getenv("DOTS_DUET_REAL_CODEX") != "1" {
-		t.Skip("set DOTS_DUET_REAL_CODEX=1 to authorize a real Codex model test")
+	if os.Getenv("DOTS_LITE_REAL_CODEX") != "1" {
+		t.Skip("set DOTS_LITE_REAL_CODEX=1 to authorize a real Codex model test")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	t.Cleanup(cancel)
-	project := t.TempDir()
+	folder := t.TempDir()
 	scope := protocol.Scope{UserID: "acceptance-user", ProfileID: "acceptance-profile", ExecutorID: "acceptance-computer"}
 	config := executor.ServiceConfig{
 		Scope: scope, StatePath: filepath.Join(t.TempDir(), "executor.sqlite"),
-		Projects: []protocol.Project{{ID: "acceptance", Root: project, ApprovalPolicy: "on-request", Sandbox: "workspace-write"}},
-		Native:   executor.Options{Stderr: io.Discard},
+		Folders: []protocol.Folder{{ID: "acceptance", Root: folder, ApprovalPolicy: "on-request", Sandbox: "workspace-write"}},
+		Native:  executor.Options{Stderr: io.Discard},
 	}
 	service, err := executor.NewService(config)
 	if err != nil {
@@ -42,7 +42,7 @@ func TestRealCodexWritesAndDownloadsArtifact(t *testing.T) {
 		}
 		if taskIssued {
 			stopCtx, stop := context.WithTimeout(context.Background(), 10*time.Second)
-			result := service.Execute(stopCtx, protocol.Operation{ID: "native-stop", TaskID: "native-task", Scope: scope, TaskVersion: 2, ProjectID: "acceptance", Action: "task.stop"})
+			result := service.Execute(stopCtx, protocol.Operation{ID: "native-stop", TaskID: "native-task", Scope: scope, TaskVersion: 2, FolderID: "acceptance", Action: "task.stop"})
 			stop()
 			if result.Error != nil {
 				t.Errorf("native stop result: %s: %s", result.Stage, result.Error)
@@ -58,8 +58,8 @@ func TestRealCodexWritesAndDownloadsArtifact(t *testing.T) {
 	taskIssued = true
 	result := service.Execute(ctx, protocol.Operation{
 		ID: "native-create", TaskID: "native-task", Scope: scope, TaskVersion: 1,
-		ProjectID: "acceptance", Action: "task.create", Name: "isolated acceptance test",
-		Input:     "Work only in the current directory. Create acceptance.txt with exactly these UTF-8 bytes, without BOM: dots-duet-native-ok followed by one LF newline. Use one local write command, then read the file to verify it. Do not inspect other directories, use network, install software, or change anything else. Return a brief final report and stop.",
+		FolderID: "acceptance", Action: "task.create", Name: "isolated acceptance test",
+		Input:     "Work only in the current directory. Create acceptance.txt with exactly these UTF-8 bytes, without BOM: dots-lite-native-ok followed by one LF newline. Use one local write command, then read the file to verify it. Do not inspect other directories, use network, install software, or change anything else. Return a brief final report and stop.",
 		Artifacts: []string{"acceptance.txt"},
 	})
 	if result.Error != nil || result.Stage != "accepted" {
@@ -91,13 +91,13 @@ func TestRealCodexWritesAndDownloadsArtifact(t *testing.T) {
 		case <-ticker.C:
 		}
 	}
-	data, err := os.ReadFile(filepath.Join(project, "acceptance.txt"))
-	if err != nil || string(data) != "dots-duet-native-ok\n" {
+	data, err := os.ReadFile(filepath.Join(folder, "acceptance.txt"))
+	if err != nil || string(data) != "dots-lite-native-ok\n" {
 		t.Fatalf("actual artifact did not match: %q, %v", data, err)
 	}
 	download := service.Execute(ctx, protocol.Operation{
 		ID: "native-download", TaskID: "native-task", Scope: scope, TaskVersion: 1,
-		ProjectID: "acceptance", Action: "files.download", Path: "acceptance.txt",
+		FolderID: "acceptance", Action: "files.download", Path: "acceptance.txt",
 	})
 	if download.Error != nil {
 		t.Fatal(download.Error)
@@ -130,8 +130,8 @@ func TestRealCodexWritesAndDownloadsArtifact(t *testing.T) {
 	}
 	continued := service.Execute(ctx, protocol.Operation{
 		ID: "native-continue-after-restart", TaskID: "native-task", Scope: scope, TaskVersion: 1,
-		ProjectID: "acceptance", Action: "task.continue",
-		Input: "Read only acceptance.txt in the current workspace. Verify its exact text is dots-duet-native-ok followed by one LF. Do not modify files, use network, or inspect other directories. Report the verification and stop.",
+		FolderID: "acceptance", Action: "task.continue",
+		Input: "Read only acceptance.txt in the current workspace. Verify its exact text is dots-lite-native-ok followed by one LF. Do not modify files, use network, or inspect other directories. Report the verification and stop.",
 	})
 	if continued.Error != nil || continued.Stage != "accepted" || continued.ThreadID != result.ThreadID || continued.TurnID == result.TurnID {
 		t.Fatalf("explicit continuation did not resume the original persisted thread: %+v", continued)
@@ -154,7 +154,7 @@ func TestRealCodexWritesAndDownloadsArtifact(t *testing.T) {
 		case <-ticker.C:
 		}
 	}
-	unchanged, err := os.ReadFile(filepath.Join(project, "acceptance.txt"))
+	unchanged, err := os.ReadFile(filepath.Join(folder, "acceptance.txt"))
 	if err != nil || string(unchanged) != string(data) {
 		t.Fatalf("continued read changed the artifact: %q, %v", unchanged, err)
 	}

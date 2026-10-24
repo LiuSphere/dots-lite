@@ -89,13 +89,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err erro
 }
 
 type serviceConfig struct {
-	Scope     protocol.Scope     `json:"scope"`
-	Folders   []protocol.Project `json:"folders"`
-	Projects  []protocol.Project `json:"projects"`
-	StatePath string             `json:"state_path"`
-	HubURL    string             `json:"hub_url"`
-	TokenFile string             `json:"token_file"`
-	Codex     string             `json:"codex"`
+	Scope     protocol.Scope    `json:"scope"`
+	Folders   []protocol.Folder `json:"folders"`
+	StatePath string            `json:"state_path"`
+	HubURL    string            `json:"hub_url"`
+	TokenFile string            `json:"token_file"`
+	Codex     string            `json:"codex"`
 }
 
 func runService(ctx context.Context, configPath string, stderr io.Writer) (err error) {
@@ -136,15 +135,8 @@ func runService(ctx context.Context, configPath string, stderr io.Writer) (err e
 	if cfg.Codex == "" {
 		cfg.Codex = "codex"
 	}
-	projects := cfg.Projects
-	if cfg.Folders != nil {
-		if cfg.Projects != nil {
-			return errors.New("configure folders or legacy projects, not both")
-		}
-		projects = cfg.Folders
-	}
 	service, err := executor.NewService(executor.ServiceConfig{
-		Scope: cfg.Scope, Projects: projects, StatePath: cfg.StatePath,
+		Scope: cfg.Scope, Folders: cfg.Folders, StatePath: cfg.StatePath,
 		Native: executor.Options{
 			Command: []string{cfg.Codex, "app-server", "--listen", "stdio://"},
 			Stderr:  stderr,

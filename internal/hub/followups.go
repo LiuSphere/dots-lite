@@ -76,11 +76,11 @@ func (h *Hub) createFollowup(tx *store.Tx, b Binding, task taskRecord, event pro
 	if event.Type == "task/quiescent" {
 		trigger.Reason = "quiescent"
 	}
-	session, err := randomID("duet_api_")
+	session, err := randomID("dots_lite_api_")
 	if err != nil {
 		return err
 	}
-	key, err := randomID("duet_event_")
+	key, err := randomID("dots_lite_event_")
 	if err != nil {
 		return err
 	}

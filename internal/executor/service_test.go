@@ -37,7 +37,7 @@ func TestServiceCreatesTaskOnceAndPreservesItsThread(t *testing.T) {
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "op-1", TaskID: "task-1", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "write a report", Name: "report"}
+	op := protocol.Operation{ID: "op-1", TaskID: "task-1", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "write a report", Name: "report"}
 	first := service.Execute(ctx, op)
 	if first.Stage != "accepted" || first.ThreadID != "thread-1" || first.TurnID != "turn-1" {
 		t.Fatalf("create: %+v", first)
@@ -58,13 +58,13 @@ func TestServiceCreatesTaskOnceAndPreservesItsThread(t *testing.T) {
 func serviceConfig(t *testing.T) executor.ServiceConfig {
 	t.Helper()
 	dir := t.TempDir()
-	return executor.ServiceConfig{Scope: protocol.Scope{UserID: "user-a", ProfileID: "profile-a", ExecutorID: "machine-a"}, Projects: []protocol.Project{{ID: "test", Root: dir}}, StatePath: filepath.Join(dir, "executor.db"), Native: executor.Options{Command: []string{os.Args[0], "-test.run=^TestServicePeer$"}, Stderr: io.Discard}}
+	return executor.ServiceConfig{Scope: protocol.Scope{UserID: "user-a", ProfileID: "profile-a", ExecutorID: "machine-a"}, Folders: []protocol.Folder{{ID: "test", Root: dir}}, StatePath: filepath.Join(dir, "executor.db"), Native: executor.Options{Command: []string{os.Args[0], "-test.run=^TestServicePeer$"}, Stderr: io.Discard}}
 }
 
 func TestServiceFileReadsStayInsideRegisteredRootAndReportTruncation(t *testing.T) {
 	ctx := context.Background()
 	config := serviceConfig(t)
-	if err := os.WriteFile(filepath.Join(config.Projects[0].Root, "report.txt"), []byte("abcdef"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(config.Folders[0].Root, "report.txt"), []byte("abcdef"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	service, err := executor.NewService(config)
@@ -72,7 +72,7 @@ func TestServiceFileReadsStayInsideRegisteredRootAndReportTruncation(t *testing.
 		t.Fatal(err)
 	}
 	defer service.Close()
-	op := protocol.Operation{ID: "read-1", Scope: config.Scope, ProjectID: "test", Action: "files.read", Path: "report.txt", Offset: 2, Length: 3}
+	op := protocol.Operation{ID: "read-1", Scope: config.Scope, FolderID: "test", Action: "files.read", Path: "report.txt", Offset: 2, Length: 3}
 	r := service.Execute(ctx, op)
 	var data struct {
 		Text      string `json:"text"`
@@ -105,7 +105,7 @@ func TestServiceRejectsConflictingWritersAndChangedOperationArguments(t *testing
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "writer-1", TaskID: "first", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "first objective"}
+	op := protocol.Operation{ID: "writer-1", TaskID: "first", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "first objective"}
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
 		t.Fatalf("first writer: %+v", r)
 	}
@@ -132,7 +132,7 @@ func TestServiceStopsTheTargetAndPersistsEventsUntilAcknowledged(t *testing.T) {
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "start-stop", TaskID: "target", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "work"}
+	op := protocol.Operation{ID: "start-stop", TaskID: "target", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "work"}
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
 		t.Fatalf("create: %+v", r)
 	}
@@ -168,7 +168,7 @@ func TestServiceStopsTheTargetAndPersistsEventsUntilAcknowledged(t *testing.T) {
 	}
 	op.ID, op.TaskID, op.TaskVersion, op.Action = "new-after-stop", "another", 1, "task.create"
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
-		t.Fatalf("project was not released after confirmed stop: %+v", r)
+		t.Fatalf("folder was not released after confirmed stop: %+v", r)
 	}
 }
 
@@ -184,7 +184,7 @@ func TestServiceContinuesTheSameThreadAndRejectsAnExpiredSteer(t *testing.T) {
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "continue-create", TaskID: "target", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "work"}
+	op := protocol.Operation{ID: "continue-create", TaskID: "target", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "work"}
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
 		t.Fatalf("create: %+v", r)
 	}
@@ -219,7 +219,7 @@ func TestServiceForwardsOnlyTheLiveExplicitApproval(t *testing.T) {
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "approval-start", TaskID: "approval-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "request approval"}
+	op := protocol.Operation{ID: "approval-start", TaskID: "approval-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "request approval"}
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
 		t.Fatalf("create: %+v", r)
 	}
@@ -281,7 +281,7 @@ func TestStopDuringThreadCreationPreventsTheOldTurnFromStarting(t *testing.T) {
 	}
 	defer control.Close()
 	_ = control.SetDeadline(time.Now().Add(5 * time.Second))
-	op := protocol.Operation{ID: "blocked-create", TaskID: "pause-target", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "must never run after pause"}
+	op := protocol.Operation{ID: "blocked-create", TaskID: "pause-target", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "must never run after pause"}
 	created := make(chan protocol.Result, 1)
 	go func() { created <- service.Execute(ctx, op) }()
 	var signal [1]byte
@@ -333,7 +333,7 @@ func TestStopDuringTurnSubmissionIsAppliedWhenTheTurnIDArrives(t *testing.T) {
 	}
 	defer control.Close()
 	_ = control.SetDeadline(time.Now().Add(5 * time.Second))
-	op := protocol.Operation{ID: "pending-turn", TaskID: "pause-turn-target", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "work"}
+	op := protocol.Operation{ID: "pending-turn", TaskID: "pause-turn-target", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "work"}
 	created := make(chan protocol.Result, 1)
 	go func() { created <- service.Execute(ctx, op) }()
 	var signal [1]byte
@@ -367,7 +367,7 @@ func TestServiceRestartPreservesReceiptAndInvalidatesOldRequests(t *testing.T) {
 	if err := first.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "persisted-start", TaskID: "persisted-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "request approval"}
+	op := protocol.Operation{ID: "persisted-start", TaskID: "persisted-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "request approval"}
 	receipt := first.Execute(ctx, op)
 	if receipt.Stage != "accepted" {
 		t.Fatalf("create: %+v", receipt)
@@ -424,7 +424,7 @@ func TestServiceRestartPreservesReceiptAndInvalidatesOldRequests(t *testing.T) {
 
 func TestServiceNeverReadsAnOutsideTargetDuringSymlinkReplacement(t *testing.T) {
 	config := serviceConfig(t)
-	root := config.Projects[0].Root
+	root := config.Folders[0].Root
 	if err := os.WriteFile(filepath.Join(root, "inside.txt"), []byte("authorized"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +441,7 @@ func TestServiceNeverReadsAnOutsideTargetDuringSymlinkReplacement(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer service.Close()
-	op := protocol.Operation{ID: "link-first", Scope: config.Scope, ProjectID: "test", Action: "files.read", Path: "switch.txt"}
+	op := protocol.Operation{ID: "link-first", Scope: config.Scope, FolderID: "test", Action: "files.read", Path: "switch.txt"}
 	if r := service.Execute(context.Background(), op); r.Stage != "accepted" {
 		t.Fatalf("authorized relative symlink: %+v", r)
 	}
@@ -480,7 +480,7 @@ func TestServiceNeverReadsAnOutsideTargetDuringSymlinkReplacement(t *testing.T) 
 
 func TestServiceRejectsOversizedFilesAndTransfersBinaryBytes(t *testing.T) {
 	config := serviceConfig(t)
-	root := config.Projects[0].Root
+	root := config.Folders[0].Root
 	if err := os.WriteFile(filepath.Join(root, "binary.bin"), []byte{0, 1, 255}, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -497,7 +497,7 @@ func TestServiceRejectsOversizedFilesAndTransfersBinaryBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer service.Close()
-	op := protocol.Operation{ID: "binary-read", Scope: config.Scope, ProjectID: "test", Action: "files.download", Path: "binary.bin"}
+	op := protocol.Operation{ID: "binary-read", Scope: config.Scope, FolderID: "test", Action: "files.download", Path: "binary.bin"}
 	r := service.Execute(context.Background(), op)
 	var data struct {
 		Base64    string `json:"data_base64"`
@@ -525,7 +525,7 @@ func TestServiceReadsAnOriginalOperationReceiptWithoutResubmitting(t *testing.T)
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "receipt-original", TaskID: "receipt-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "work"}
+	op := protocol.Operation{ID: "receipt-original", TaskID: "receipt-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "work"}
 	original := service.Execute(ctx, op)
 	if original.Stage != "accepted" {
 		t.Fatalf("create: %+v", original)
@@ -550,7 +550,7 @@ func TestServiceDistinguishesNativeRejectionFromUnknownSubmission(t *testing.T) 
 			config := serviceConfig(t)
 			input := "work"
 			if stage == "thread" {
-				config.Projects[0].Model = "reject-model"
+				config.Folders[0].Model = "reject-model"
 			} else {
 				input = "reject turn"
 			}
@@ -562,7 +562,7 @@ func TestServiceDistinguishesNativeRejectionFromUnknownSubmission(t *testing.T) 
 			if err := service.StartNative(ctx); err != nil {
 				t.Fatal(err)
 			}
-			r := service.Execute(ctx, protocol.Operation{ID: "rejected", TaskID: "rejected-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: input})
+			r := service.Execute(ctx, protocol.Operation{ID: "rejected", TaskID: "rejected-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: input})
 			if r.Stage != "failed" || r.Error == nil || r.Error.Code != "native" {
 				t.Fatalf("explicit native rejection was reported as uncertain: %+v", r)
 			}
@@ -585,7 +585,7 @@ func TestStoppingAnAlreadyIdleCompletedTaskDoesNotInterruptItsOldTurn(t *testing
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "completed-start", TaskID: "completed-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "complete immediately"}
+	op := protocol.Operation{ID: "completed-start", TaskID: "completed-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "complete immediately"}
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
 		t.Fatalf("create: %+v", r)
 	}
@@ -607,11 +607,11 @@ func TestStoppingAnAlreadyIdleCompletedTaskDoesNotInterruptItsOldTurn(t *testing
 	}
 }
 
-func TestServicePublishesDeclaredArtifactsBeforeQuiescenceAndReleasesProject(t *testing.T) {
+func TestServicePublishesDeclaredArtifactsBeforeQuiescenceAndReleasesFolder(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	config := serviceConfig(t)
-	if err := os.WriteFile(filepath.Join(config.Projects[0].Root, "report.txt"), []byte("verified report"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(config.Folders[0].Root, "report.txt"), []byte("verified report"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	service, err := executor.NewService(config)
@@ -622,7 +622,7 @@ func TestServicePublishesDeclaredArtifactsBeforeQuiescenceAndReleasesProject(t *
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "artifact-start", TaskID: "artifact-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "complete immediately", Artifacts: []string{"report.txt", "missing.txt"}}
+	op := protocol.Operation{ID: "artifact-start", TaskID: "artifact-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "complete immediately", Artifacts: []string{"report.txt", "missing.txt"}}
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
 		t.Fatalf("create: %+v", r)
 	}
@@ -675,11 +675,11 @@ func TestServicePublishesDeclaredArtifactsBeforeQuiescenceAndReleasesProject(t *
 	}
 	op.ID, op.TaskID, op.Input, op.Artifacts = "next-start", "next-task", "write next report", nil
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
-		t.Fatalf("completed project remains occupied: %+v", r)
+		t.Fatalf("completed folder remains occupied: %+v", r)
 	}
 }
 
-func TestServiceDoesNotReleaseAProjectWithoutProvenNativeQuiescence(t *testing.T) {
+func TestServiceDoesNotReleaseAFolderWithoutProvenNativeQuiescence(t *testing.T) {
 	for _, input := range []string{"complete with active goal", "complete with unknown goal", "complete with missing goal", "complete with unloaded thread"} {
 		t.Run(input, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -693,7 +693,7 @@ func TestServiceDoesNotReleaseAProjectWithoutProvenNativeQuiescence(t *testing.T
 			if err := service.StartNative(ctx); err != nil {
 				t.Fatal(err)
 			}
-			op := protocol.Operation{ID: "uncertain-start", TaskID: "uncertain-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: input}
+			op := protocol.Operation{ID: "uncertain-start", TaskID: "uncertain-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: input}
 			if r := service.Execute(ctx, op); r.Stage != "accepted" {
 				t.Fatalf("create: %+v", r)
 			}
@@ -719,7 +719,7 @@ func TestServiceDoesNotReleaseAProjectWithoutProvenNativeQuiescence(t *testing.T
 			}
 			op.ID, op.TaskID, op.Input = "competing-start", "competing-task", "write next report"
 			if r := service.Execute(ctx, op); r.Stage != "failed" || r.Error == nil || r.Error.Code != "conflict" {
-				t.Fatalf("unproven project released: %+v", r)
+				t.Fatalf("unproven folder released: %+v", r)
 			}
 		})
 	}
@@ -737,7 +737,7 @@ func TestServiceRequiresABoundedBudgetBeforeActivatingNativeGoal(t *testing.T) {
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "bounded-start", TaskID: "bounded-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "write report"}
+	op := protocol.Operation{ID: "bounded-start", TaskID: "bounded-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "write report"}
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
 		t.Fatalf("create: %+v", r)
 	}
@@ -771,7 +771,7 @@ func TestServiceUploadsBoundInputAttachmentsWithoutReplacingExistingFiles(t *tes
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "upload-start", TaskID: "upload-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "read attachments"}
+	op := protocol.Operation{ID: "upload-start", TaskID: "upload-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "read attachments"}
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
 		t.Fatalf("create: %+v", r)
 	}
@@ -788,14 +788,14 @@ func TestServiceUploadsBoundInputAttachmentsWithoutReplacingExistingFiles(t *tes
 			Hash string `json:"sha256"`
 			Size int64  `json:"size"`
 		}
-		if json.Unmarshal(r.Data, &uploaded) != nil || uploaded.Path != filepath.ToSlash(filepath.Join(".dots-duet", "attachments", "upload-task", name)) || uploaded.Hash != op.Upload.SHA256 || uploaded.Size != int64(len(data)) {
+		if json.Unmarshal(r.Data, &uploaded) != nil || uploaded.Path != filepath.ToSlash(filepath.Join(".dots-lite", "attachments", "upload-task", name)) || uploaded.Hash != op.Upload.SHA256 || uploaded.Size != int64(len(data)) {
 			t.Fatalf("upload metadata: %s", r.Data)
 		}
 		first := r
 		if replay := service.Execute(ctx, op); replay.Stage != "accepted" || string(replay.Data) != string(first.Data) {
 			t.Fatalf("same upload replay: %+v", replay)
 		}
-		read := service.Execute(ctx, protocol.Operation{ID: fmt.Sprintf("read-upload-%d", i), TaskID: op.TaskID, Scope: op.Scope, ProjectID: op.ProjectID, Action: "files.download", Path: uploaded.Path})
+		read := service.Execute(ctx, protocol.Operation{ID: fmt.Sprintf("read-upload-%d", i), TaskID: op.TaskID, Scope: op.Scope, FolderID: op.FolderID, Action: "files.download", Path: uploaded.Path})
 		var fetched struct {
 			Data string `json:"data_base64"`
 		}
@@ -813,7 +813,7 @@ func TestServiceRejectsAnUnboundOrCorruptAttachmentBeforeWritingIt(t *testing.T)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	config := serviceConfig(t)
-	config.Projects = append(config.Projects, protocol.Project{ID: "other", Root: t.TempDir()})
+	config.Folders = append(config.Folders, protocol.Folder{ID: "other", Root: t.TempDir()})
 	service, err := executor.NewService(config)
 	if err != nil {
 		t.Fatal(err)
@@ -822,7 +822,7 @@ func TestServiceRejectsAnUnboundOrCorruptAttachmentBeforeWritingIt(t *testing.T)
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "invalid-upload-start", TaskID: "upload-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "read attachments"}
+	op := protocol.Operation{ID: "invalid-upload-start", TaskID: "upload-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "read attachments"}
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
 		t.Fatalf("create: %+v", r)
 	}
@@ -841,7 +841,7 @@ func TestServiceRejectsAnUnboundOrCorruptAttachmentBeforeWritingIt(t *testing.T)
 		{"absolute", func(o *protocol.Operation) { o.Upload.Name = "/outside.txt" }, "invalid_upload"},
 		{"alternate stream", func(o *protocol.Operation) { o.Upload.Name = "input.txt:stream" }, "invalid_upload"},
 		{"other task", func(o *protocol.Operation) { o.TaskID = "other-task" }, "task_not_found"},
-		{"other project", func(o *protocol.Operation) { o.ProjectID = "other" }, "forbidden"},
+		{"other folder", func(o *protocol.Operation) { o.FolderID = "other" }, "forbidden"},
 		{"old version", func(o *protocol.Operation) { o.TaskVersion = 0 }, "stale_version"},
 		{"other scope", func(o *protocol.Operation) { o.Scope.ProfileID = "other-profile" }, "forbidden"},
 	}
@@ -860,18 +860,18 @@ func TestServiceRejectsAnUnboundOrCorruptAttachmentBeforeWritingIt(t *testing.T)
 	}
 }
 
-func TestServiceNeverUploadsOutsideTheProjectDuringSymlinkReplacement(t *testing.T) {
+func TestServiceNeverUploadsOutsideTheFolderDuringSymlinkReplacement(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	config := serviceConfig(t)
-	root, outside := config.Projects[0].Root, t.TempDir()
+	root, outside := config.Folders[0].Root, t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, "allowed-attachments"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(filepath.Join(root, ".dots-duet"), 0700); err != nil {
+	if err := os.Mkdir(filepath.Join(root, ".dots-lite"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(root, ".dots-duet", "attachments")
+	link := filepath.Join(root, ".dots-lite", "attachments")
 	if err := os.Symlink(filepath.Join("..", "allowed-attachments"), link); err != nil {
 		t.Skipf("symlink creation unavailable: %v", err)
 	}
@@ -883,7 +883,7 @@ func TestServiceNeverUploadsOutsideTheProjectDuringSymlinkReplacement(t *testing
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "race-upload-start", TaskID: "upload-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "read attachments"}
+	op := protocol.Operation{ID: "race-upload-start", TaskID: "upload-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "read attachments"}
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
 		t.Fatalf("create: %+v", r)
 	}
@@ -916,7 +916,7 @@ func TestServiceNeverUploadsOutsideTheProjectDuringSymlinkReplacement(t *testing
 		t.Fatal(err)
 	}
 	if len(entries) != 0 {
-		t.Fatalf("upload escaped authorized project: %v", entries)
+		t.Fatalf("upload escaped authorized folder: %v", entries)
 	}
 }
 
@@ -931,7 +931,7 @@ func TestServicePersistsUnknownTaskEventWhenTheNativeProcessExits(t *testing.T) 
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "crashing-start", TaskID: "crashing-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "exit process"}
+	op := protocol.Operation{ID: "crashing-start", TaskID: "crashing-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "exit process"}
 	r := service.Execute(ctx, op)
 	if r.Stage != "accepted" && r.Stage != "unknown" {
 		t.Fatalf("crashing receipt: %+v", r)
@@ -980,27 +980,27 @@ func TestServicePersistsUnknownTaskEventWhenTheNativeProcessExits(t *testing.T) 
 	}
 }
 
-func TestServiceKeepsMachineReadyWhenARegisteredProjectIsUnavailable(t *testing.T) {
+func TestServiceKeepsMachineReadyWhenARegisteredFolderIsUnavailable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	config := serviceConfig(t)
 	root := filepath.Join(t.TempDir(), "temporarily-unavailable")
-	config.Projects[0].Root = root
+	config.Folders[0].Root = root
 	service, err := executor.NewService(config)
 	if err != nil {
-		t.Fatalf("unavailable project disabled whole service: %v", err)
+		t.Fatalf("unavailable folder disabled whole service: %v", err)
 	}
 	defer service.Close()
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err := service.Snapshot(ctx)
-	if err != nil || !snapshot.Initialized || len(snapshot.Projects) != 1 || snapshot.Projects[0].Available {
+	if err != nil || !snapshot.Initialized || len(snapshot.Folders) != 1 || snapshot.Folders[0].Available {
 		t.Fatalf("separate readiness: %+v err=%v", snapshot, err)
 	}
-	op := protocol.Operation{ID: "missing-project-start", TaskID: "missing-project-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "write report"}
-	if r := service.Execute(ctx, op); r.Stage != "failed" || r.Error == nil || r.Error.Code != "project_unavailable" {
-		t.Fatalf("unavailable project started: %+v", r)
+	op := protocol.Operation{ID: "missing-folder-start", TaskID: "missing-folder-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "write report"}
+	if r := service.Execute(ctx, op); r.Stage != "failed" || r.Error == nil || r.Error.Code != "folder_unavailable" {
+		t.Fatalf("unavailable folder started: %+v", r)
 	}
 	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("executor created unavailable root: %v", err)
@@ -1009,25 +1009,25 @@ func TestServiceKeepsMachineReadyWhenARegisteredProjectIsUnavailable(t *testing.
 		t.Fatal(err)
 	}
 	snapshot, err = service.Snapshot(ctx)
-	if err != nil || !snapshot.Projects[0].Available {
-		t.Fatalf("restored project unavailable: %+v err=%v", snapshot, err)
+	if err != nil || !snapshot.Folders[0].Available {
+		t.Fatalf("restored folder unavailable: %+v err=%v", snapshot, err)
 	}
-	op.ID = "restored-project-start"
+	op.ID = "restored-folder-start"
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
-		t.Fatalf("restored project start: %+v", r)
+		t.Fatalf("restored folder start: %+v", r)
 	}
 }
 
-func TestServiceDoesNotAuthorizeAReplacementOfTheRegisteredProjectDirectory(t *testing.T) {
+func TestServiceDoesNotAuthorizeAReplacementOfTheRegisteredFolderDirectory(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	config := serviceConfig(t)
 	parent := t.TempDir()
-	root, original := filepath.Join(parent, "project"), filepath.Join(parent, "original-project")
+	root, original := filepath.Join(parent, "folder"), filepath.Join(parent, "original-folder")
 	if err := os.Mkdir(root, 0700); err != nil {
 		t.Fatal(err)
 	}
-	config.Projects[0].Root = root
+	config.Folders[0].Root = root
 	service, err := executor.NewService(config)
 	if err != nil {
 		t.Fatal(err)
@@ -1036,7 +1036,7 @@ func TestServiceDoesNotAuthorizeAReplacementOfTheRegisteredProjectDirectory(t *t
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "directory-start", TaskID: "directory-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "write report"}
+	op := protocol.Operation{ID: "directory-start", TaskID: "directory-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "write report"}
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
 		t.Fatalf("create: %+v", r)
 	}
@@ -1053,16 +1053,16 @@ func TestServiceDoesNotAuthorizeAReplacementOfTheRegisteredProjectDirectory(t *t
 		t.Fatal(err)
 	}
 	snapshot, err := service.Snapshot(ctx)
-	if err != nil || !snapshot.Initialized || snapshot.Projects[0].Available {
+	if err != nil || !snapshot.Initialized || snapshot.Folders[0].Available {
 		t.Fatalf("replacement authorized: %+v err=%v", snapshot, err)
 	}
-	read := protocol.Operation{ID: "directory-read", Scope: config.Scope, ProjectID: "test", Action: "files.read", Path: "replacement.txt"}
-	if r := service.Execute(ctx, read); r.Stage != "failed" || r.Error == nil || r.Error.Code != "project_unavailable" {
+	read := protocol.Operation{ID: "directory-read", Scope: config.Scope, FolderID: "test", Action: "files.read", Path: "replacement.txt"}
+	if r := service.Execute(ctx, read); r.Stage != "failed" || r.Error == nil || r.Error.Code != "folder_unavailable" {
 		t.Fatalf("replacement file read: %+v", r)
 	}
 	op.ID, op.Action, op.TaskVersion = "directory-stop", "task.stop", 2
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
-		t.Fatalf("unavailable project prevented stop: %+v", r)
+		t.Fatalf("unavailable folder prevented stop: %+v", r)
 	}
 }
 
@@ -1102,7 +1102,7 @@ func TestServiceFailsClosedWithoutPartialRequestStateWhenEventPersistenceFails(t
 			if _, err := db.Exec(`CREATE TRIGGER injected_storage_failure BEFORE INSERT ON ` + table + ` BEGIN SELECT RAISE(FAIL, 'injected critical persistence failure'); END`); err != nil {
 				t.Fatal(err)
 			}
-			op := protocol.Operation{ID: "storage-fault-create", TaskID: "storage-fault-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "request approval"}
+			op := protocol.Operation{ID: "storage-fault-create", TaskID: "storage-fault-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "request approval"}
 			service.Execute(ctx, op)
 			var snapshot protocol.Snapshot
 			for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
@@ -1143,7 +1143,7 @@ func TestServiceFailsClosedWithoutPartialRequestStateWhenEventPersistenceFails(t
 	}
 }
 
-func TestStopDoesNotConfirmOrReleaseTheProjectBeforeAnOlderGoalActivationSettles(t *testing.T) {
+func TestStopDoesNotConfirmOrReleaseTheFolderBeforeAnOlderGoalActivationSettles(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -1167,7 +1167,7 @@ func TestStopDoesNotConfirmOrReleaseTheProjectBeforeAnOlderGoalActivationSettles
 	}
 	defer control.Close()
 	_ = control.SetDeadline(time.Now().Add(5 * time.Second))
-	op := protocol.Operation{ID: "before-goal-create", TaskID: "goal-race-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "complete immediately"}
+	op := protocol.Operation{ID: "before-goal-create", TaskID: "goal-race-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "complete immediately"}
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
 		t.Fatalf("create: %+v", r)
 	}
@@ -1205,7 +1205,7 @@ func TestStopDoesNotConfirmOrReleaseTheProjectBeforeAnOlderGoalActivationSettles
 	competing := op
 	competing.ID, competing.TaskID, competing.Input = "competing-before-settle", "competing-task", "write another report"
 	if r := service.Execute(ctx, competing); r.Stage != "failed" || r.Error == nil || r.Error.Code != "conflict" {
-		t.Fatalf("project released before older Goal settled: %+v", r)
+		t.Fatalf("folder released before older Goal settled: %+v", r)
 	}
 	if _, err := control.Write([]byte("r")); err != nil {
 		t.Fatal(err)
@@ -1226,7 +1226,7 @@ func TestStopDoesNotConfirmOrReleaseTheProjectBeforeAnOlderGoalActivationSettles
 	}
 	competing.ID = "competing-after-settle"
 	if r := service.Execute(ctx, competing); r.Stage != "accepted" {
-		t.Fatalf("verified late pause kept project occupied: %+v", r)
+		t.Fatalf("verified late pause kept folder occupied: %+v", r)
 	}
 }
 
@@ -1260,7 +1260,7 @@ func TestServiceRunRestartsTheFailedNativeInstanceWithoutReplayingItsUnknownWrit
 	if !first.Initialized {
 		t.Fatalf("native never ready: %+v", first)
 	}
-	op := protocol.Operation{ID: "restart-unknown-write", TaskID: "restart-unknown-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "exit without receipt"}
+	op := protocol.Operation{ID: "restart-unknown-write", TaskID: "restart-unknown-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "exit without receipt"}
 	original := service.Execute(ctx, op)
 	if original.Stage != "unknown" {
 		t.Fatalf("unacknowledged write: %+v", original)
@@ -1287,7 +1287,7 @@ func TestServiceRunRestartsTheFailedNativeInstanceWithoutReplayingItsUnknownWrit
 	}
 	op.ID, op.TaskID, op.Input = "restart-competing-write", "restart-competing-task", "write report"
 	if r := service.Execute(ctx, op); r.Stage != "failed" || r.Error == nil || r.Error.Code != "conflict" {
-		t.Fatalf("recovery released uncertain project occupancy: %+v", r)
+		t.Fatalf("recovery released uncertain folder occupancy: %+v", r)
 	}
 	time.Sleep(100 * time.Millisecond)
 	stable, err := service.Snapshot(ctx)
@@ -1303,7 +1303,7 @@ func TestServiceNativeRestartBudgetSurvivesTransportReconnectsAndServiceRecreati
 	defer hub.Close()
 	config := serviceConfig(t)
 	for i := 1; i < 5; i++ {
-		config.Projects = append(config.Projects, protocol.Project{ID: fmt.Sprintf("project-%d", i), Root: t.TempDir()})
+		config.Folders = append(config.Folders, protocol.Folder{ID: fmt.Sprintf("folder-%d", i), Root: t.TempDir()})
 	}
 	service, err := executor.NewService(config)
 	if err != nil {
@@ -1344,7 +1344,7 @@ func TestServiceNativeRestartBudgetSurvivesTransportReconnectsAndServiceRecreati
 		if err != nil {
 			t.Fatal(err)
 		}
-		op := protocol.Operation{ID: fmt.Sprintf("budget-crash-%d", i), TaskID: fmt.Sprintf("budget-task-%d", i), Scope: config.Scope, ProjectID: config.Projects[i].ID, TaskVersion: 1, Action: "task.create", Input: "exit without receipt"}
+		op := protocol.Operation{ID: fmt.Sprintf("budget-crash-%d", i), TaskID: fmt.Sprintf("budget-task-%d", i), Scope: config.Scope, FolderID: config.Folders[i].ID, TaskVersion: 1, Action: "task.create", Input: "exit without receipt"}
 		if r := service.Execute(ctx, op); r.Stage != "unknown" {
 			t.Fatalf("crash %d: %+v", i, r)
 		}
@@ -1405,7 +1405,7 @@ func TestServiceContinuesAnUnloadedThreadOnlyWhenItsGoalIsProvenInactive(t *test
 			if active {
 				input = "complete with unloaded active goal"
 			}
-			op := protocol.Operation{ID: "unloaded-create", TaskID: "unloaded-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: input}
+			op := protocol.Operation{ID: "unloaded-create", TaskID: "unloaded-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: input}
 			if r := service.Execute(ctx, op); r.Stage != "accepted" {
 				t.Fatalf("create: %+v", r)
 			}
@@ -1463,7 +1463,7 @@ func TestServiceStagesNewTaskInputsBeforeNativeExecutionAndPassesOnlyFileMetadat
 	}
 	emptyHash := sha256.Sum256(nil)
 	binaryHash := sha256.Sum256([]byte{0, 255, 128, 1})
-	op := protocol.Operation{ID: "create-with-inputs", TaskID: "input-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "inspect staged input files", InputFiles: []protocol.FileUpload{
+	op := protocol.Operation{ID: "create-with-inputs", TaskID: "input-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "inspect staged input files", InputFiles: []protocol.FileUpload{
 		{Name: "empty.bin", DataBase64: "", Size: 0, SHA256: hex.EncodeToString(emptyHash[:])},
 		{Name: "binary.bin", DataBase64: "AP+AAQ==", Size: 4, SHA256: hex.EncodeToString(binaryHash[:])},
 	}}
@@ -1512,7 +1512,7 @@ func TestServiceRejectsInvalidNewTaskInputsBeforeWritingOrStartingNativeWork(t *
 			if err := service.StartNative(ctx); err != nil {
 				t.Fatal(err)
 			}
-			op := protocol.Operation{ID: "bad-input-create", TaskID: "input-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "inspect input", InputFiles: test.files}
+			op := protocol.Operation{ID: "bad-input-create", TaskID: "input-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "inspect input", InputFiles: test.files}
 			if r := service.Execute(ctx, op); r.Stage != "failed" || r.Error == nil || r.Error.Code != test.code {
 				t.Fatalf("invalid inputs reached native: %+v", r)
 			}
@@ -1520,7 +1520,7 @@ func TestServiceRejectsInvalidNewTaskInputsBeforeWritingOrStartingNativeWork(t *
 			if err != nil || len(snapshot.Tasks) != 0 {
 				t.Fatalf("invalid inputs created partial task: %+v err=%v", snapshot, err)
 			}
-			read := service.Execute(ctx, protocol.Operation{ID: "inspect-invalid-files", Scope: config.Scope, ProjectID: "test", Action: "files.list", Path: ".dots-duet"})
+			read := service.Execute(ctx, protocol.Operation{ID: "inspect-invalid-files", Scope: config.Scope, FolderID: "test", Action: "files.list", Path: ".dots-lite"})
 			if read.Stage != "failed" || read.Error == nil || read.Error.Code != "not_found" {
 				t.Fatalf("invalid batch wrote early attachments: %+v", read)
 			}
@@ -1536,7 +1536,7 @@ func TestServiceRetainsStagedFilesAndReportsARealInputWriteFailureWithoutStartin
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	config := serviceConfig(t)
-	dir := filepath.Join(config.Projects[0].Root, ".dots-duet", "attachments", "input-task")
+	dir := filepath.Join(config.Folders[0].Root, ".dots-lite", "attachments", "input-task")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -1552,7 +1552,7 @@ func TestServiceRetainsStagedFilesAndReportsARealInputWriteFailureWithoutStartin
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256([]byte("new"))
-	op := protocol.Operation{ID: "partial-input-create", TaskID: "input-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "inspect input", InputFiles: []protocol.FileUpload{
+	op := protocol.Operation{ID: "partial-input-create", TaskID: "input-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "inspect input", InputFiles: []protocol.FileUpload{
 		{Name: "first.bin", DataBase64: "bmV3", SHA256: hex.EncodeToString(sum[:]), Size: 3},
 		{Name: "second.bin", DataBase64: "bmV3", SHA256: hex.EncodeToString(sum[:]), Size: 3},
 	}}
@@ -1563,11 +1563,11 @@ func TestServiceRetainsStagedFilesAndReportsARealInputWriteFailureWithoutStartin
 			Path string `json:"path"`
 		} `json:"input_files"`
 	}
-	if r.Stage != "failed" || r.Error == nil || r.Error.Code != "file_exists" || json.Unmarshal(r.Data, &partial) != nil || partial.ThreadID != "" || partial.Execution != "failed" || len(partial.InputFiles) != 1 || partial.InputFiles[0].Path != ".dots-duet/attachments/input-task/first.bin" {
+	if r.Stage != "failed" || r.Error == nil || r.Error.Code != "file_exists" || json.Unmarshal(r.Data, &partial) != nil || partial.ThreadID != "" || partial.Execution != "failed" || len(partial.InputFiles) != 1 || partial.InputFiles[0].Path != ".dots-lite/attachments/input-task/first.bin" {
 		t.Fatalf("partial input failure was hidden: %+v data=%s", r, r.Data)
 	}
 	for i, test := range []struct{ name, content string }{{"first.bin", "new"}, {"second.bin", "existing"}} {
-		read := service.Execute(ctx, protocol.Operation{ID: fmt.Sprintf("partial-read-%d", i), TaskID: op.TaskID, Scope: op.Scope, ProjectID: op.ProjectID, Action: "files.read", Path: ".dots-duet/attachments/input-task/" + test.name})
+		read := service.Execute(ctx, protocol.Operation{ID: fmt.Sprintf("partial-read-%d", i), TaskID: op.TaskID, Scope: op.Scope, FolderID: op.FolderID, Action: "files.read", Path: ".dots-lite/attachments/input-task/" + test.name})
 		var file struct {
 			Text string `json:"text"`
 		}
@@ -1601,12 +1601,12 @@ func TestServiceAcceptsNewTaskInputFilesAtTheCombinedEightMiBLimit(t *testing.T)
 	first := protocol.FileUpload{Name: "limit-first.bin", DataBase64: base64.StdEncoding.EncodeToString(data), SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data))}
 	second := first
 	second.Name = "limit-second.bin"
-	op := protocol.Operation{ID: "limit-input-create", TaskID: "input-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "inspect input", InputFiles: []protocol.FileUpload{first, second}}
+	op := protocol.Operation{ID: "limit-input-create", TaskID: "input-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "inspect input", InputFiles: []protocol.FileUpload{first, second}}
 	if r := service.Execute(ctx, op); r.Stage != "accepted" {
 		t.Fatalf("valid combined 8 MiB inputs rejected: %+v", r)
 	}
 	for i, file := range op.InputFiles {
-		r := service.Execute(ctx, protocol.Operation{ID: fmt.Sprintf("limit-input-read-%d", i), TaskID: op.TaskID, Scope: op.Scope, ProjectID: op.ProjectID, Action: "files.download", Path: ".dots-duet/attachments/input-task/" + file.Name})
+		r := service.Execute(ctx, protocol.Operation{ID: fmt.Sprintf("limit-input-read-%d", i), TaskID: op.TaskID, Scope: op.Scope, FolderID: op.FolderID, Action: "files.download", Path: ".dots-lite/attachments/input-task/" + file.Name})
 		var stored struct {
 			Hash string `json:"sha256"`
 			Size int64  `json:"size"`
@@ -1629,7 +1629,7 @@ func TestServicePeer(t *testing.T) {
 	if len(os.Args) == 4 && os.Args[2] == "expect-resume-cwd" {
 		interrupted = true
 	}
-	projectRoot := ""
+	folderRoot := ""
 	var control net.Conn
 	var pendingTurnID json.RawMessage
 	var pendingGoalID json.RawMessage
@@ -1713,14 +1713,14 @@ func TestServicePeer(t *testing.T) {
 				Cwd   string `json:"cwd"`
 			}
 			_ = json.Unmarshal(frame.Params, &params)
-			projectRoot = params.Cwd
+			folderRoot = params.Cwd
 			if len(os.Args) == 4 && os.Args[2] == "expect-cwd" && filepath.Clean(params.Cwd) != filepath.Clean(os.Args[3]) {
 				_ = enc.Encode(map[string]any{"id": frame.ID, "error": map[string]any{"code": -32602, "message": "native cwd did not match the selected task directory"}})
 				continue
 			}
 			if len(os.Args) == 3 && os.Args[2] == "expect-inputs" {
-				empty, emptyErr := os.ReadFile(filepath.Join(projectRoot, ".dots-duet", "attachments", "input-task", "empty.bin"))
-				binary, binaryErr := os.ReadFile(filepath.Join(projectRoot, ".dots-duet", "attachments", "input-task", "binary.bin"))
+				empty, emptyErr := os.ReadFile(filepath.Join(folderRoot, ".dots-lite", "attachments", "input-task", "empty.bin"))
+				binary, binaryErr := os.ReadFile(filepath.Join(folderRoot, ".dots-lite", "attachments", "input-task", "binary.bin"))
 				if emptyErr != nil || binaryErr != nil || len(empty) != 0 || string(binary) != string([]byte{0, 255, 128, 1}) {
 					_ = enc.Encode(map[string]any{"id": frame.ID, "error": map[string]any{"code": -32602, "message": "input attachments were not staged before thread/start"}})
 					continue
@@ -1758,13 +1758,13 @@ func TestServicePeer(t *testing.T) {
 				if len(params.Input) > 0 {
 					text = params.Input[0].Text
 				}
-				_, manifest, found := strings.Cut(text, "\n\nInput files (paths are relative to the project workspace):\n")
+				_, manifest, found := strings.Cut(text, "\n\nInput files (paths are relative to the folder workspace):\n")
 				valid := found && !strings.Contains(text, "data_base64") && !strings.Contains(text, "AP+AAQ==") && json.Unmarshal([]byte(manifest), &files) == nil && len(files) == 2
 				for _, file := range files {
 					if !filepath.IsLocal(filepath.FromSlash(file.Path)) {
 						valid = false
 					}
-					data, err := os.ReadFile(filepath.Join(projectRoot, filepath.FromSlash(file.Path)))
+					data, err := os.ReadFile(filepath.Join(folderRoot, filepath.FromSlash(file.Path)))
 					sum := sha256.Sum256(data)
 					if err != nil || int64(len(data)) != file.Size || hex.EncodeToString(sum[:]) != file.Hash {
 						valid = false

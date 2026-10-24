@@ -1,7 +1,7 @@
 """The model-visible business interface. Identity and approval are not inputs."""
 
 QUERIES = (
-    "machine", "folders", "projects", "tasks", "task", "operations", "operation", "history",
+    "machine", "folders", "tasks", "task", "operations", "operation", "history",
     "artifacts", "directory", "text", "download", "requests", "followups", "session", "goal", "deliveries",
 )
 
@@ -34,7 +34,7 @@ ATTACHMENT = {
 TOOL_SCHEMAS = {
     "dots_lite_query": schema({
         "query": {"type": "string", "enum": list(QUERIES)},
-        "task_id": STRING, "operation_id": STRING, "folder_id": STRING, "project_id": STRING,
+        "task_id": STRING, "operation_id": STRING, "folder_id": STRING,
         "path": STRING, "cursor": STRING, "offset": {"type": "integer", "minimum": 0},
         "length": {"type": "integer", "minimum": 1, "maximum": 8 * 1024 * 1024},
     }, ["query"]),
@@ -42,7 +42,7 @@ TOOL_SCHEMAS = {
         "action": {"type": "string", "enum": [
             "task.create", "task.continue", "turn.steer", "goal.set", "files.upload",
         ]},
-        "task_id": STRING, "folder_id": STRING, "project_id": STRING, "input": STRING, "name": STRING,
+        "task_id": STRING, "folder_id": STRING, "input": STRING, "name": STRING,
         "working_directory": {
             **STRING,
             "description": "Relative to the authorized folder root; defaults to '.'. Use forward slashes, without '..', absolute paths, backslashes or colons. A task keeps this directory for its lifetime.",
@@ -72,8 +72,8 @@ TOOL_SCHEMAS["dots_lite_prepare"]["allOf"] = [{
 }]
 
 DESCRIPTIONS = {
-    "dots_lite_query": "Query your bound machine, authorized folders, tasks, operations, requests, or files. Use folders to select a folder_id. directory without task_id requires explicit folder_id and lists relative to that folder; text/download and task directory queries are relative to the task's fixed working directory. projects/project_id are compatibility aliases for folders/folder_id. session returns native thread/runtime and pending requests; goal returns the actual native Goal.",
-    "dots_lite_prepare": "Register a business operation without executing it. task.create selects folder_id and an optional relative working_directory (default '.'); later operations cannot change that directory. project_id is a compatibility alias for folder_id. Keep operation_id before submitting. task.create inputs and files.upload upload accept name/local_path references to attachments in this exact inbound message. Never supply file bytes, Base64 or a different message's files. submit performs the write.",
+    "dots_lite_query": "Query your bound machine, authorized folders, tasks, operations, requests, or files. Use folders to select a folder_id. directory without task_id requires explicit folder_id and lists relative to that folder; text/download and task directory queries are relative to the task's fixed working directory. session returns native thread/runtime and pending requests; goal returns the actual native Goal.",
+    "dots_lite_prepare": "Register a business operation without executing it. task.create selects folder_id and an optional relative working_directory (default '.'); later operations cannot change that directory. Keep operation_id before submitting. task.create inputs and files.upload upload accept name/local_path references to attachments in this exact inbound message. Never supply file bytes, Base64 or a different message's files. submit performs the write.",
     "dots_lite_submit": "Submit a previously registered operation. An uncertain result must be queried, not recreated.",
     "dots_lite_stop": "Persist pause intent and request native Goal pause and turn interruption for this task.",
     "dots_lite_answer": "Answer a structured technical question. This does not grant approvals or permissions.",

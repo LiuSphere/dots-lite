@@ -24,7 +24,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
         with hub_peer(responder=lambda path, body: {"accepted": True}) as (socket_path, requests):
             params = StdioServerParameters(
                 command=sys.executable, args=["-m", "dots_lite_hermes"],
-                env={**os.environ, "DOTS_DUET_SOCKET": socket_path},
+                env={**os.environ, "DOTS_LITE_SOCKET": socket_path},
             )
             async with asyncio.timeout(10):
                 async with stdio_client(params) as streams:
@@ -47,14 +47,14 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
         with hub_peer(responder=lambda path, body: {"operation_id": "attachment-operation"}) as (socket_path, requests):
             params = StdioServerParameters(
                 command=sys.executable, args=["-m", "dots_lite_hermes"],
-                env={**os.environ, "DOTS_DUET_SOCKET": socket_path},
+                env={**os.environ, "DOTS_LITE_SOCKET": socket_path},
             )
             async with asyncio.timeout(10):
                 async with stdio_client(params) as streams:
                     async with ClientSession(*streams) as session:
                         await session.initialize()
                         for args in (
-                            {"action": "task.create", "project_id": "demo", "inputs": [{"name": "input.bin", "local_path": "/native/input.bin"}]},
+                            {"action": "task.create", "folder_id": "demo", "inputs": [{"name": "input.bin", "local_path": "/native/input.bin"}]},
                             {"action": "files.upload", "task_id": "Q1", "upload": {"name": "input.bin", "local_path": "/native/input.bin"}},
                         ):
                             result = await session.call_tool("dots_lite_prepare", {**args, "_context_ref": "private-registration"})
@@ -99,12 +99,31 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(result.is_error)
                     self.assertIn("context", result.content[0].text.lower())
 
+    async def test_old_folder_aliases_are_rejected_before_hub_transport(self):
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "dots_lite_hermes"],
+            env={**os.environ, "DOTS_LITE_SOCKET": "/missing/hub.sock"},
+        )
+        async with asyncio.timeout(10):
+            async with stdio_client(params) as streams:
+                async with ClientSession(*streams) as session:
+                    await session.initialize()
+                    for tool, arguments, expected in (
+                        ("dots_lite_query", {"query": "directory", "project_id": "old", "path": "."}, "Additional properties"),
+                        ("dots_lite_prepare", {"action": "task.create", "project_id": "old", "input": "work"}, "Additional properties"),
+                        ("dots_lite_query", {"query": "projects"}, "is not one of"),
+                    ):
+                        with self.subTest(tool=tool, arguments=arguments):
+                            result = await session.call_tool(tool, {**arguments, "_context_ref": "trusted-reference"})
+                            self.assertTrue(result.is_error)
+                            self.assertIn(expected, result.content[0].text)
+
     @unittest.skipUnless(hasattr(socket, "AF_UNIX"), "UID socket integration runs on Linux")
     async def test_bound_query_reaches_hub_with_original_arguments(self):
         with hub_peer() as (socket_path, requests):
             params = StdioServerParameters(
                 command=sys.executable, args=["-m", "dots_lite_hermes"],
-                env={**os.environ, "DOTS_DUET_SOCKET": socket_path},
+                env={**os.environ, "DOTS_LITE_SOCKET": socket_path},
             )
             async with asyncio.timeout(10):
                 async with stdio_client(params) as streams:
@@ -140,7 +159,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
         with hub_peer(responder) as (socket_path, requests):
             params = StdioServerParameters(
                 command=sys.executable, args=["-m", "dots_lite_hermes"],
-                env={**os.environ, "DOTS_DUET_SOCKET": socket_path},
+                env={**os.environ, "DOTS_LITE_SOCKET": socket_path},
             )
             async with asyncio.timeout(10):
                 async with stdio_client(params) as streams:
@@ -171,7 +190,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                     with hub_peer(lambda path, body: payload) as (socket_path, requests):
                         params = StdioServerParameters(
                             command=sys.executable, args=["-m", "dots_lite_hermes"],
-                            env={**os.environ, "DOTS_DUET_SOCKET": socket_path, "DOTS_DUET_FILES_DIR": files},
+                            env={**os.environ, "DOTS_LITE_SOCKET": socket_path, "DOTS_LITE_FILES_DIR": files},
                         )
                         async with asyncio.timeout(10):
                             async with stdio_client(params) as streams:
@@ -282,9 +301,9 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(requests, [])
 
     async def call_bound(self, socket_path, tool, arguments, elicitation=None, files=None):
-        environment = {**os.environ, "DOTS_DUET_SOCKET": socket_path}
+        environment = {**os.environ, "DOTS_LITE_SOCKET": socket_path}
         if files:
-            environment["DOTS_DUET_FILES_DIR"] = files
+            environment["DOTS_LITE_FILES_DIR"] = files
         params = StdioServerParameters(
             command=sys.executable, args=["-m", "dots_lite_hermes"], env=environment,
         )

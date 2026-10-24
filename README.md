@@ -44,7 +44,7 @@ go build -o dist/executor.exe ./cmd/executor
 uv sync --project adapters/hermes --locked
 ```
 
-普通 `go test ./...` 不启动真实模型。显式设置 `DOTS_DUET_REAL_CODEX=1` 后，集成测试才在临时项目调用真实 Codex，验证文件及重启后继续原会话。执行端使用 `-config <私有 JSON>` 常驻运行，也可用 `-probe` 做无模型就绪检查。Hub 在 Linux 使用 `-config`、`-state`、`-socket`、`-listen` 启动；所有实际验收范围均见验收记录。
+普通 `go test ./...` 不启动真实模型。显式设置 `DOTS_LITE_REAL_CODEX=1` 后，集成测试才在临时项目调用真实 Codex，验证文件及重启后继续原会话。执行端使用 `-config <私有 JSON>` 常驻运行，也可用 `-probe` 做无模型就绪检查。Hub 在 Linux 使用 `-config`、`-state`、`-socket`、`-listen` 启动；所有实际验收范围均见验收记录。
 
 ## 需求范围
 

@@ -19,7 +19,7 @@ func TestServiceUsesSelectedExistingWorkingDirectoryForNativeCreate(t *testing.T
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	config := serviceConfig(t)
-	workdir := filepath.Join(config.Projects[0].Root, "child")
+	workdir := filepath.Join(config.Folders[0].Root, "child")
 	if err := os.Mkdir(workdir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestServiceUsesSelectedExistingWorkingDirectoryForNativeCreate(t *testing.T
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "child-create", TaskID: "child-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "work"}
+	op := protocol.Operation{ID: "child-create", TaskID: "child-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "work"}
 	if err := json.Unmarshal([]byte(`{"working_directory":"child"}`), &op); err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestServiceFilesAndAttachmentsStayInsideTaskWorkingDirectory(t *testing.T) 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	config := serviceConfig(t)
-	grant := config.Projects[0].Root
+	grant := config.Folders[0].Root
 	child := filepath.Join(grant, "child")
 	if err := os.Mkdir(child, 0700); err != nil {
 		t.Fatal(err)
@@ -75,12 +75,12 @@ func TestServiceFilesAndAttachmentsStayInsideTaskWorkingDirectory(t *testing.T) 
 		sum := sha256.Sum256(data)
 		return protocol.FileUpload{Name: name, DataBase64: base64.StdEncoding.EncodeToString(data), Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])}
 	}
-	op := protocol.Operation{ID: "child-inputs", TaskID: "input-task", Scope: config.Scope, ProjectID: "test", WorkingDirectory: "child", TaskVersion: 1, Action: "task.create", Input: "inspect staged input files", InputFiles: []protocol.FileUpload{file("empty.bin", nil), file("binary.bin", []byte{0, 255, 128, 1})}}
+	op := protocol.Operation{ID: "child-inputs", TaskID: "input-task", Scope: config.Scope, FolderID: "test", WorkingDirectory: "child", TaskVersion: 1, Action: "task.create", Input: "inspect staged input files", InputFiles: []protocol.FileUpload{file("empty.bin", nil), file("binary.bin", []byte{0, 255, 128, 1})}}
 	first := service.Execute(ctx, op)
 	if first.Stage != "accepted" {
 		t.Fatalf("native did not find child attachments: %+v", first)
 	}
-	read := protocol.Operation{ID: "child-read", TaskID: op.TaskID, Scope: config.Scope, ProjectID: "test", Action: "files.read", Path: "report.txt"}
+	read := protocol.Operation{ID: "child-read", TaskID: op.TaskID, Scope: config.Scope, FolderID: "test", Action: "files.read", Path: "report.txt"}
 	result := service.Execute(ctx, read)
 	var data struct {
 		Text string `json:"text"`
@@ -93,15 +93,15 @@ func TestServiceFilesAndAttachmentsStayInsideTaskWorkingDirectory(t *testing.T) 
 		t.Fatalf("task read escaped to grant root: %+v", result)
 	}
 	later := file("later.bin", []byte{4, 5, 6})
-	upload := protocol.Operation{ID: "child-later-input", TaskID: op.TaskID, Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "files.upload", Upload: &later}
+	upload := protocol.Operation{ID: "child-later-input", TaskID: op.TaskID, Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "files.upload", Upload: &later}
 	if result := service.Execute(ctx, upload); result.Stage != "accepted" {
 		t.Fatalf("later upload: %+v", result)
 	}
-	actual, err := os.ReadFile(filepath.Join(child, ".dots-duet", "attachments", op.TaskID, later.Name))
+	actual, err := os.ReadFile(filepath.Join(child, ".dots-lite", "attachments", op.TaskID, later.Name))
 	if err != nil || string(actual) != string([]byte{4, 5, 6}) {
 		t.Fatalf("later upload not in task cwd: bytes=%v error=%v", actual, err)
 	}
-	if _, err := os.Stat(filepath.Join(grant, ".dots-duet")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(grant, ".dots-lite")); !os.IsNotExist(err) {
 		t.Fatalf("attachments were also written in the grant root: %v", err)
 	}
 	if replay := service.Execute(ctx, op); replay.Stage != "accepted" || string(replay.Data) != string(first.Data) {
@@ -113,7 +113,7 @@ func TestServiceAutomaticArtifactsUseTaskWorkingDirectory(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	config := serviceConfig(t)
-	grant := config.Projects[0].Root
+	grant := config.Folders[0].Root
 	child := filepath.Join(grant, "child")
 	if err := os.Mkdir(child, 0700); err != nil {
 		t.Fatal(err)
@@ -131,7 +131,7 @@ func TestServiceAutomaticArtifactsUseTaskWorkingDirectory(t *testing.T) {
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "child-artifacts", TaskID: "child-task", Scope: config.Scope, ProjectID: "test", WorkingDirectory: "child", TaskVersion: 1, Action: "task.create", Input: "complete immediately", Artifacts: []string{"report.txt"}}
+	op := protocol.Operation{ID: "child-artifacts", TaskID: "child-task", Scope: config.Scope, FolderID: "test", WorkingDirectory: "child", TaskVersion: 1, Action: "task.create", Input: "complete immediately", Artifacts: []string{"report.txt"}}
 	if result := service.Execute(ctx, op); result.Stage != "accepted" {
 		t.Fatalf("create: %+v", result)
 	}
@@ -160,7 +160,7 @@ func TestServiceRestoresOriginalWorkingDirectoryWhenContinuingThread(t *testing.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	config := serviceConfig(t)
-	child := filepath.Join(config.Projects[0].Root, "child")
+	child := filepath.Join(config.Folders[0].Root, "child")
 	if err := os.Mkdir(child, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestServiceRestoresOriginalWorkingDirectoryWhenContinuingThread(t *testing.
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "child-start", TaskID: "child-task", Scope: config.Scope, ProjectID: "test", WorkingDirectory: "child", TaskVersion: 1, Action: "task.create", Input: "work"}
+	op := protocol.Operation{ID: "child-start", TaskID: "child-task", Scope: config.Scope, FolderID: "test", WorkingDirectory: "child", TaskVersion: 1, Action: "task.create", Input: "work"}
 	if result := service.Execute(ctx, op); result.Stage != "accepted" {
 		t.Fatalf("create: %+v", result)
 	}
@@ -208,7 +208,7 @@ func TestServiceRejectsWorkingDirectoryChangesForExistingTask(t *testing.T) {
 	defer cancel()
 	config := serviceConfig(t)
 	for _, directory := range []string{"child", "other"} {
-		if err := os.Mkdir(filepath.Join(config.Projects[0].Root, directory), 0700); err != nil {
+		if err := os.Mkdir(filepath.Join(config.Folders[0].Root, directory), 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -220,12 +220,12 @@ func TestServiceRejectsWorkingDirectoryChangesForExistingTask(t *testing.T) {
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "immutable-create", TaskID: "immutable-task", Scope: config.Scope, ProjectID: "test", WorkingDirectory: "child", TaskVersion: 1, Action: "task.create", Input: "work"}
+	op := protocol.Operation{ID: "immutable-create", TaskID: "immutable-task", Scope: config.Scope, FolderID: "test", WorkingDirectory: "child", TaskVersion: 1, Action: "task.create", Input: "work"}
 	if result := service.Execute(ctx, op); result.Stage != "accepted" {
 		t.Fatalf("create: %+v", result)
 	}
 	for _, action := range []string{"task.continue", "turn.steer", "goal.set", "files.read", "files.upload", "approval.respond", "question.respond", "task.stop"} {
-		changed := protocol.Operation{ID: "retarget-" + action, TaskID: op.TaskID, Scope: config.Scope, ProjectID: "test", WorkingDirectory: "other", TaskVersion: 1, Action: action, Input: "retarget", Path: "report.txt", ExpectedTurnID: "turn-1", Goal: json.RawMessage(`{"status":"active","tokenBudget":10}`)}
+		changed := protocol.Operation{ID: "retarget-" + action, TaskID: op.TaskID, Scope: config.Scope, FolderID: "test", WorkingDirectory: "other", TaskVersion: 1, Action: action, Input: "retarget", Path: "report.txt", ExpectedTurnID: "turn-1", Goal: json.RawMessage(`{"status":"active","tokenBudget":10}`)}
 		if result := service.Execute(ctx, changed); result.Error == nil || result.Error.Code != "invalid_working_directory" {
 			t.Fatalf("%s did not reject task retargeting: %+v", action, result)
 		}
@@ -249,7 +249,7 @@ func TestServiceRejectsInvalidOrMissingWorkingDirectoriesBeforeTaskSideEffects(t
 		t.Fatal(err)
 	}
 	for i, directory := range []string{"../outside", "child/../other", "/absolute", "C:/absolute", "C:relative", "child\\nested", "child//nested", "missing", "missing/nested"} {
-		op := protocol.Operation{ID: "bad-cwd-" + directory, TaskID: "bad-task", Scope: config.Scope, ProjectID: "test", WorkingDirectory: directory, TaskVersion: 1, Action: "task.create", Input: "work"}
+		op := protocol.Operation{ID: "bad-cwd-" + directory, TaskID: "bad-task", Scope: config.Scope, FolderID: "test", WorkingDirectory: directory, TaskVersion: 1, Action: "task.create", Input: "work"}
 		result := service.Execute(ctx, op)
 		if result.Stage != "failed" || result.Error == nil || (result.Error.Code != "invalid_working_directory" && result.Error.Code != "working_directory_unavailable") {
 			t.Fatalf("invalid directory %d %q: %+v", i, directory, result)
@@ -259,12 +259,12 @@ func TestServiceRejectsInvalidOrMissingWorkingDirectoriesBeforeTaskSideEffects(t
 	if err != nil || len(state.Tasks) != 0 {
 		t.Fatalf("invalid directory created tasks: %+v error=%v", state, err)
 	}
-	for _, path := range []string{"missing", ".dots-duet"} {
-		if _, err := os.Stat(filepath.Join(config.Projects[0].Root, path)); !os.IsNotExist(err) {
+	for _, path := range []string{"missing", ".dots-lite"} {
+		if _, err := os.Stat(filepath.Join(config.Folders[0].Root, path)); !os.IsNotExist(err) {
 			t.Fatalf("invalid directory created %s: %v", path, err)
 		}
 	}
-	op := protocol.Operation{ID: "valid-default-cwd", TaskID: "default-task", Scope: config.Scope, ProjectID: "test", TaskVersion: 1, Action: "task.create", Input: "work"}
+	op := protocol.Operation{ID: "valid-default-cwd", TaskID: "default-task", Scope: config.Scope, FolderID: "test", TaskVersion: 1, Action: "task.create", Input: "work"}
 	result := service.Execute(ctx, op)
 	var task protocol.Task
 	if result.Stage != "accepted" || result.ThreadID != "thread-1" || json.Unmarshal(result.Data, &task) != nil || task.WorkingDirectory != "." {
@@ -277,7 +277,7 @@ func TestServiceAllowsSiblingTaskDirectoriesAndRejectsOverlappingLeases(t *testi
 	defer cancel()
 	config := serviceConfig(t)
 	for _, directory := range []string{"a/nested", "b"} {
-		if err := os.MkdirAll(filepath.Join(config.Projects[0].Root, filepath.FromSlash(directory)), 0700); err != nil {
+		if err := os.MkdirAll(filepath.Join(config.Folders[0].Root, filepath.FromSlash(directory)), 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -290,22 +290,22 @@ func TestServiceAllowsSiblingTaskDirectoriesAndRejectsOverlappingLeases(t *testi
 		t.Fatal(err)
 	}
 	for _, directory := range []string{"a", "b"} {
-		op := protocol.Operation{ID: "start-" + directory, TaskID: "task-" + directory, Scope: config.Scope, ProjectID: "test", WorkingDirectory: directory, TaskVersion: 1, Action: "task.create", Input: "work"}
+		op := protocol.Operation{ID: "start-" + directory, TaskID: "task-" + directory, Scope: config.Scope, FolderID: "test", WorkingDirectory: directory, TaskVersion: 1, Action: "task.create", Input: "work"}
 		if result := service.Execute(ctx, op); result.Stage != "accepted" {
 			t.Fatalf("sibling %s: %+v", directory, result)
 		}
 	}
 	for _, directory := range []string{"a", "a/nested", "."} {
-		op := protocol.Operation{ID: "overlap-" + directory, TaskID: "overlap-task", Scope: config.Scope, ProjectID: "test", WorkingDirectory: directory, TaskVersion: 1, Action: "task.create", Input: "work"}
+		op := protocol.Operation{ID: "overlap-" + directory, TaskID: "overlap-task", Scope: config.Scope, FolderID: "test", WorkingDirectory: directory, TaskVersion: 1, Action: "task.create", Input: "work"}
 		if result := service.Execute(ctx, op); result.Error == nil || result.Error.Code != "conflict" {
 			t.Fatalf("overlap %s: %+v", directory, result)
 		}
 	}
 	t.Run("directory alias", func(t *testing.T) {
-		if err := os.Symlink("a", filepath.Join(config.Projects[0].Root, "alias")); err != nil {
+		if err := os.Symlink("a", filepath.Join(config.Folders[0].Root, "alias")); err != nil {
 			t.Skipf("directory symlink unavailable: %v", err)
 		}
-		op := protocol.Operation{ID: "alias-conflict", TaskID: "alias-task", Scope: config.Scope, ProjectID: "test", WorkingDirectory: "alias", TaskVersion: 1, Action: "task.create", Input: "work"}
+		op := protocol.Operation{ID: "alias-conflict", TaskID: "alias-task", Scope: config.Scope, FolderID: "test", WorkingDirectory: "alias", TaskVersion: 1, Action: "task.create", Input: "work"}
 		if result := service.Execute(ctx, op); result.Error == nil || result.Error.Code != "conflict" {
 			t.Fatalf("alias bypassed the lease: %+v", result)
 		}
@@ -316,7 +316,7 @@ func TestServiceDeniesWorkingDirectoryAndFileLinksOutsideTaskScope(t *testing.T)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	config := serviceConfig(t)
-	grant, outside := config.Projects[0].Root, t.TempDir()
+	grant, outside := config.Folders[0].Root, t.TempDir()
 	child := filepath.Join(grant, "child")
 	if err := os.Mkdir(child, 0700); err != nil {
 		t.Fatal(err)
@@ -338,7 +338,7 @@ func TestServiceDeniesWorkingDirectoryAndFileLinksOutsideTaskScope(t *testing.T)
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "outside-directory", TaskID: "outside-task", Scope: config.Scope, ProjectID: "test", WorkingDirectory: "outside", TaskVersion: 1, Action: "task.create", Input: "work"}
+	op := protocol.Operation{ID: "outside-directory", TaskID: "outside-task", Scope: config.Scope, FolderID: "test", WorkingDirectory: "outside", TaskVersion: 1, Action: "task.create", Input: "work"}
 	if result := service.Execute(ctx, op); result.Error == nil || result.Error.Code != "working_directory_unavailable" {
 		t.Fatalf("outside task root accepted: %+v", result)
 	}
@@ -346,7 +346,7 @@ func TestServiceDeniesWorkingDirectoryAndFileLinksOutsideTaskScope(t *testing.T)
 	if result := service.Execute(ctx, op); result.Stage != "accepted" || result.ThreadID != "thread-1" {
 		t.Fatalf("invalid root ran native work: %+v", result)
 	}
-	read := protocol.Operation{ID: "child-link-read", TaskID: op.TaskID, Scope: config.Scope, ProjectID: "test", Action: "files.read", Path: "escape.txt"}
+	read := protocol.Operation{ID: "child-link-read", TaskID: op.TaskID, Scope: config.Scope, FolderID: "test", Action: "files.read", Path: "escape.txt"}
 	if result := service.Execute(ctx, read); result.Error == nil || result.Error.Code != "path_denied" {
 		t.Fatalf("file link escaped task scope: %+v data=%s", result, result.Data)
 	}
@@ -356,7 +356,7 @@ func TestServiceRefusesToRebindRestoredTaskToChangedAuthorizedFolder(t *testing.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	config := serviceConfig(t)
-	child := filepath.Join(config.Projects[0].Root, "child")
+	child := filepath.Join(config.Folders[0].Root, "child")
 	if err := os.Mkdir(child, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -367,15 +367,15 @@ func TestServiceRefusesToRebindRestoredTaskToChangedAuthorizedFolder(t *testing.
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "old-folder-create", TaskID: "preserved-task", Scope: config.Scope, ProjectID: "test", WorkingDirectory: "child", TaskVersion: 1, Action: "task.create", Input: "work"}
+	op := protocol.Operation{ID: "old-folder-create", TaskID: "preserved-task", Scope: config.Scope, FolderID: "test", WorkingDirectory: "child", TaskVersion: 1, Action: "task.create", Input: "work"}
 	if result := service.Execute(ctx, op); result.Stage != "accepted" {
 		t.Fatalf("create: %+v", result)
 	}
 	if err := service.Close(); err != nil {
 		t.Fatal(err)
 	}
-	config.Projects[0].Root = t.TempDir()
-	if err := os.Mkdir(filepath.Join(config.Projects[0].Root, "child"), 0700); err != nil {
+	config.Folders[0].Root = t.TempDir()
+	if err := os.Mkdir(filepath.Join(config.Folders[0].Root, "child"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	service, err = executor.NewService(config)
@@ -402,7 +402,7 @@ func TestServiceRejectsReplacementOfHeldTaskDirectory(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	config := serviceConfig(t)
-	child := filepath.Join(config.Projects[0].Root, "child")
+	child := filepath.Join(config.Folders[0].Root, "child")
 	if err := os.Mkdir(child, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +414,7 @@ func TestServiceRejectsReplacementOfHeldTaskDirectory(t *testing.T) {
 	if err := service.StartNative(ctx); err != nil {
 		t.Fatal(err)
 	}
-	op := protocol.Operation{ID: "held-child-create", TaskID: "held-child-task", Scope: config.Scope, ProjectID: "test", WorkingDirectory: "child", TaskVersion: 1, Action: "task.create", Input: "work"}
+	op := protocol.Operation{ID: "held-child-create", TaskID: "held-child-task", Scope: config.Scope, FolderID: "test", WorkingDirectory: "child", TaskVersion: 1, Action: "task.create", Input: "work"}
 	if result := service.Execute(ctx, op); result.Stage != "accepted" {
 		t.Fatalf("create: %+v", result)
 	}
@@ -427,7 +427,7 @@ func TestServiceRejectsReplacementOfHeldTaskDirectory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(child, "replacement.txt"), []byte("replacement bytes"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	read := protocol.Operation{ID: "held-child-read", TaskID: op.TaskID, Scope: config.Scope, ProjectID: "test", Action: "files.read", Path: "replacement.txt"}
+	read := protocol.Operation{ID: "held-child-read", TaskID: op.TaskID, Scope: config.Scope, FolderID: "test", Action: "files.read", Path: "replacement.txt"}
 	if result := service.Execute(ctx, read); result.Error == nil || result.Error.Code != "working_directory_unavailable" {
 		t.Fatalf("held task silently adopted replacement: %+v data=%s", result, result.Data)
 	}

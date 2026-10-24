@@ -91,7 +91,7 @@ class AttachmentTests(unittest.TestCase):
                                           message_id="message-a")
             # Authority's retained alias is the path shown to the model on execution.
             reference = str(cache / "native-inputs" / hashlib.sha256(path.read_bytes()).hexdigest() / path.name)
-            args = {"action": "task.create", "project_id": "demo", "input": "Read the attachment",
+            args = {"action": "task.create", "folder_id": "demo", "input": "Read the attachment",
                     "inputs": [{"name": "input.bin", "local_path": reference}]}
             result = plugin.pre_tool_call(tool_name="mcp__dots_lite__dots_lite_prepare", args=args,
                                           task_id="native-a", tool_call_id="call-a")

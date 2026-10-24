@@ -38,10 +38,10 @@ func TestAPIQueriesRequireTheirPreRegisteredTask(t *testing.T) {
 	var first, second struct {
 		TaskID string `json:"task_id"`
 	}
-	if err := json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","working_directory":"first","input":"first"}`), &first); err != nil {
+	if err := json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","working_directory":"first","input":"first"}`), &first); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","project_id":"demo","input":"second"}`), &second); err != nil {
+	if err := json.Unmarshal(call(t, h, 1001, "dots_lite_prepare", `{"action":"task.create","folder_id":"demo","input":"second"}`), &second); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(h.WebsocketHandler())

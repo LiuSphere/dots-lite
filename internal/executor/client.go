@@ -135,7 +135,7 @@ func Start(ctx context.Context, opts Options) (*Client, error) {
 		initializeCtx, cancel = context.WithTimeout(ctx, opts.StartupTimeout)
 		defer cancel()
 	}
-	initializeParams := map[string]any{"clientInfo": map[string]string{"name": "dots_lite", "version": "0.2.0"}}
+	initializeParams := map[string]any{"clientInfo": map[string]string{"name": "dots_lite", "version": "0.3.0"}}
 	if opts.ExperimentalAPI {
 		initializeParams["capabilities"] = map[string]bool{"experimentalApi": true}
 	}

@@ -48,12 +48,12 @@ def smoke(options):
     if not machine["connected"] or not machine["snapshot"]["initialized"]:
         raise RuntimeError("Actual remote executor is not initialized")
     text_name, binary_name, extra_name = ["smoke-" + identity + suffix for suffix in (".txt", ".bin", "-extra.txt")]
-    text = b"dots-duet-cross-machine-ok\n"
+    text = b"dots-lite-cross-machine-ok\n"
     binary = bytes([0, 1, 2, 127, 128, 255])
-    extra = b"dots-duet-extra-ok\n"
+    extra = b"dots-lite-extra-ok\n"
     prepared = call("dots_lite_prepare", {
-        "action": "task.create", "project_id": "acceptance", "name": "isolated cross-machine acceptance",
-        "input": f"Work only in the current registered workspace. Create exactly three files: {text_name} with UTF-8 bytes dots-duet-cross-machine-ok followed by one LF; {binary_name} with exactly six bytes 00 01 02 7f 80 ff; {extra_name} with UTF-8 bytes dots-duet-extra-ok followed by one LF. Use one local write command and read all three to verify. Do not inspect other directories, use network, install software, or change other files. Report briefly and stop.",
+        "action": "task.create", "folder_id": "acceptance", "name": "isolated cross-machine acceptance",
+        "input": f"Work only in the current registered workspace. Create exactly three files: {text_name} with UTF-8 bytes dots-lite-cross-machine-ok followed by one LF; {binary_name} with exactly six bytes 00 01 02 7f 80 ff; {extra_name} with UTF-8 bytes dots-lite-extra-ok followed by one LF. Use one local write command and read all three to verify. Do not inspect other directories, use network, install software, or change other files. Report briefly and stop.",
         "artifacts": [text_name, binary_name],
     })
     if prepared["stage"] != "prepared":

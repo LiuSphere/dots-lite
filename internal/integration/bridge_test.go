@@ -51,7 +51,7 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 	scope := protocol.Scope{UserID: "fixture-user", ProfileID: "fixture-profile", ExecutorID: "fixture-computer"}
 	h, err := hub.New(hub.Config{Bindings: []hub.Binding{{
 		UID: 101, UserID: scope.UserID, ProfileID: scope.ProfileID, ExecutorID: scope.ExecutorID,
-		Token: "fixture-executor-token", ProjectIDs: []string{"project"},
+		Token: "fixture-executor-token", FolderIDs: []string{"folder"},
 		Sources: []hub.AllowedSource{{Platform: "fixture", SenderID: "sender", ChatID: "chat"}},
 	}}}, db)
 	if err != nil {
@@ -60,10 +60,10 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 	server := httptest.NewServer(h.WebsocketHandler())
 	t.Cleanup(server.Close)
 	authorizedRoot := t.TempDir()
-	projectRoot := authorizedRoot
+	folderRoot := authorizedRoot
 	if workingDirectory != "" {
-		projectRoot = filepath.Join(authorizedRoot, filepath.FromSlash(workingDirectory))
-		if err := os.MkdirAll(projectRoot, 0700); err != nil {
+		folderRoot = filepath.Join(authorizedRoot, filepath.FromSlash(workingDirectory))
+		if err := os.MkdirAll(folderRoot, 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -73,7 +73,7 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 	}
 	service, err := executor.NewService(executor.ServiceConfig{
 		Scope: scope, StatePath: filepath.Join(state, "executor.sqlite"),
-		Projects: []protocol.Project{{ID: "project", Root: authorizedRoot, ApprovalPolicy: "on-request", Sandbox: "workspace-write"}},
+		Folders: []protocol.Folder{{ID: "folder", Root: authorizedRoot, ApprovalPolicy: "on-request", Sandbox: "workspace-write"}},
 		Native: executor.Options{
 			Command: []string{os.Args[0], "-test.run=^TestNativeProcess$", "--", nativeMode},
 			Stderr:  io.Discard,
@@ -121,8 +121,8 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 			t.Fatal(err)
 		}
 		if machine.Connected && machine.Snapshot.Initialized {
-			if len(machine.Snapshot.Projects) != 1 || machine.Snapshot.Projects[0].ID != "project" {
-				t.Fatalf("registered project missing from readiness: %s", result)
+			if len(machine.Snapshot.Folders) != 1 || machine.Snapshot.Folders[0].ID != "folder" {
+				t.Fatalf("registered folder missing from readiness: %s", result)
 			}
 			break
 		}
@@ -154,14 +154,14 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 		}
 		return result
 	}
-	prepareArgs := map[string]any{"action": "task.create", "project_id": "project", "input": "Create the fixture proof file", "name": "fixture task"}
+	prepareArgs := map[string]any{"action": "task.create", "folder_id": "folder", "input": "Create the fixture proof file", "name": "fixture task"}
 	if workingDirectory != "" {
 		folders := callTool("dots_lite_query", map[string]string{"query": "folders"})
-		var listed []protocol.Project
+		var listed []protocol.Folder
 		if err := json.Unmarshal(folders, &listed); err != nil || len(listed) != 1 || listed[0].Root != authorizedRoot {
 			t.Fatalf("authorized folders: %s, %v", folders, err)
 		}
-		directory := callTool("dots_lite_query", map[string]string{"query": "directory", "folder_id": "project", "path": "team-a"})
+		directory := callTool("dots_lite_query", map[string]string{"query": "directory", "folder_id": "folder", "path": "team-a"})
 		var listing struct {
 			Entries []struct {
 				Name        string `json:"name"`
@@ -171,8 +171,8 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 		if err := json.Unmarshal(directory, &listing); err != nil || len(listing.Entries) != 1 || listing.Entries[0].Name != "demo" || !listing.Entries[0].IsDirectory {
 			t.Fatalf("browse before a task: %s, %v", directory, err)
 		}
-		delete(prepareArgs, "project_id")
-		prepareArgs["folder_id"] = "project"
+		delete(prepareArgs, "folder_id")
+		prepareArgs["folder_id"] = "folder"
 		prepareArgs["working_directory"] = workingDirectory
 		prepareArgs["artifacts"] = []string{"proof.txt"}
 	}
@@ -206,11 +206,11 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 	if registration.Stage != "prepared" || registration.TaskID == "" || registration.OperationID == "" {
 		t.Fatalf("missing recoverable registration: %s", prepared)
 	}
-	if _, err := os.Stat(filepath.Join(projectRoot, "proof.txt")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(folderRoot, "proof.txt")); !os.IsNotExist(err) {
 		t.Fatalf("prepare produced execution side effects: %v", err)
 	}
 	if withInputs {
-		if _, err := os.Stat(filepath.Join(projectRoot, ".dots-duet", "attachments", registration.TaskID)); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(folderRoot, ".dots-lite", "attachments", registration.TaskID)); !os.IsNotExist(err) {
 			t.Fatalf("prepare staged input files before submission: %v", err)
 		}
 		assertPublic(callTool("dots_lite_query", map[string]string{"query": "operation", "operation_id": registration.OperationID}))
@@ -247,13 +247,13 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 		t.Fatalf("duplicate operation changed its persisted receipt: %s / %s", submitted, repeated)
 	}
 	assertPublic(callTool("dots_lite_query", map[string]string{"query": "operations", "task_id": registration.TaskID}))
-	proof, err := os.ReadFile(filepath.Join(projectRoot, "proof.txt"))
+	proof, err := os.ReadFile(filepath.Join(folderRoot, "proof.txt"))
 	if err != nil || string(proof) != "executed\n" {
 		t.Fatalf("duplicate submission repeated or lost execution: proof=%q, error=%v", proof, err)
 	}
 	if withInputs {
 		for _, name := range []string{"input.bin", "empty.txt"} {
-			actual, err := os.ReadFile(filepath.Join(projectRoot, ".dots-duet", "attachments", registration.TaskID, name))
+			actual, err := os.ReadFile(filepath.Join(folderRoot, ".dots-lite", "attachments", registration.TaskID, name))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -305,7 +305,7 @@ func runRegisteredBridge(t *testing.T, withInputs bool, workingDirectory string)
 		if _, err := os.Stat(filepath.Join(authorizedRoot, "proof.txt")); !os.IsNotExist(err) {
 			t.Fatalf("task wrote outside its chosen working directory: %v", err)
 		}
-		if _, err := os.Stat(filepath.Join(authorizedRoot, ".dots-duet")); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(authorizedRoot, ".dots-lite")); !os.IsNotExist(err) {
 			t.Fatalf("inputs were staged at authorization root: %v", err)
 		}
 	}
@@ -330,7 +330,7 @@ func TestNativeProcess(t *testing.T) {
 func nativePeer(expectInputs bool) error {
 	decoder := json.NewDecoder(os.Stdin)
 	encoder := json.NewEncoder(os.Stdout)
-	projectRoot := ""
+	folderRoot := ""
 	turnNumber := 0
 	for {
 		var message struct {
@@ -364,21 +364,21 @@ func nativePeer(expectInputs bool) error {
 			if err := json.Unmarshal(message.Params, &params); err != nil {
 				return err
 			}
-			projectRoot = params.CWD
+			folderRoot = params.CWD
 			if expectInputs {
-				if err := verifyStagedInputsBeforeTurn(projectRoot); err != nil {
+				if err := verifyStagedInputsBeforeTurn(folderRoot); err != nil {
 					return err
 				}
 			}
 			result = map[string]any{"thread": map[string]any{"id": "fixture-thread", "status": map[string]string{"type": "idle"}}}
 		case "turn/start":
 			if expectInputs {
-				if err := verifyNativeInputFiles(projectRoot, message.Params); err != nil {
+				if err := verifyNativeInputFiles(folderRoot, message.Params); err != nil {
 					return err
 				}
 			}
 			turnNumber++
-			file, err := os.OpenFile(filepath.Join(projectRoot, "proof.txt"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+			file, err := os.OpenFile(filepath.Join(folderRoot, "proof.txt"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 			if err != nil {
 				return err
 			}
@@ -407,7 +407,7 @@ func nativePeer(expectInputs bool) error {
 	}
 }
 
-func verifyNativeInputFiles(projectRoot string, raw json.RawMessage) error {
+func verifyNativeInputFiles(folderRoot string, raw json.RawMessage) error {
 	var params struct {
 		Input []struct {
 			Text string `json:"text"`
@@ -454,7 +454,7 @@ func verifyNativeInputFiles(projectRoot string, raw json.RawMessage) error {
 			return fmt.Errorf("duplicate native input filename: %s", name)
 		}
 		seen[name] = true
-		actual, err := os.ReadFile(filepath.Join(projectRoot, path))
+		actual, err := os.ReadFile(filepath.Join(folderRoot, path))
 		if err != nil {
 			return fmt.Errorf("input %s was not readable before turn/start: %w", name, err)
 		}
@@ -466,8 +466,8 @@ func verifyNativeInputFiles(projectRoot string, raw json.RawMessage) error {
 	return nil
 }
 
-func verifyStagedInputsBeforeTurn(projectRoot string) error {
-	directories, err := filepath.Glob(filepath.Join(projectRoot, ".dots-duet", "attachments", "*"))
+func verifyStagedInputsBeforeTurn(folderRoot string) error {
+	directories, err := filepath.Glob(filepath.Join(folderRoot, ".dots-lite", "attachments", "*"))
 	if err != nil {
 		return err
 	}

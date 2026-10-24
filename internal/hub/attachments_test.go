@@ -16,7 +16,7 @@ import (
 )
 
 func privateCreateInvocation() protocol.Invocation {
-	return protocol.Invocation{Tool: "dots_lite_prepare", Arguments: json.RawMessage(`{"action":"task.create","project_id":"demo","input":"read supplied inputs","inputs":[{"name":"input.txt","local_path":"/allowed/input"},{"name":"empty.txt","local_path":"/allowed/empty"}]}`), Source: protocol.Source{Kind: "gateway", Platform: "test", SenderID: "sender-a", ChatID: "chat-a", SessionID: "session-a"}, AttachmentFiles: []protocol.InvocationAttachment{
+	return protocol.Invocation{Tool: "dots_lite_prepare", Arguments: json.RawMessage(`{"action":"task.create","folder_id":"demo","input":"read supplied inputs","inputs":[{"name":"input.txt","local_path":"/allowed/input"},{"name":"empty.txt","local_path":"/allowed/empty"}]}`), Source: protocol.Source{Kind: "gateway", Platform: "test", SenderID: "sender-a", ChatID: "chat-a", SessionID: "session-a"}, AttachmentFiles: []protocol.InvocationAttachment{
 		{LocalPath: "/allowed/input", File: protocol.FileUpload{Name: "input.txt", DataBase64: "YWJj", SHA256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", Size: 3}},
 		{LocalPath: "/allowed/empty", File: protocol.FileUpload{Name: "empty.txt", DataBase64: "", SHA256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", Size: 0}},
 	}}
@@ -153,7 +153,7 @@ func TestPrivateUploadReferenceAndLegacyRawUploadKeepBytesOffPublicResults(t *te
 					done <- fmt.Errorf("upload bytes changed between invocation and executor: %+v", frame.Operation)
 					return
 				}
-				done <- wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "result", ID: frame.ID, Result: &protocol.Result{OperationID: frame.Operation.ID, TaskID: taskID, Stage: "accepted", Data: json.RawMessage(`{"path":".dots-duet/attachments/input.txt","size":3}`)}})
+				done <- wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "result", ID: frame.ID, Result: &protocol.Result{OperationID: frame.Operation.ID, TaskID: taskID, Stage: "accepted", Data: json.RawMessage(`{"path":".dots-lite/attachments/input.txt","size":3}`)}})
 			}()
 			result := call(t, h, 1001, "dots_lite_submit", `{"operation_id":"`+ids.ID+`"}`)
 			if err = <-done; err != nil {

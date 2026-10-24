@@ -4,7 +4,7 @@
 
 ## 绑定与工作目录
 
-- Hub 新配置用 `bindings[].folder_ids`，执行端用 `folders=[{id,root,...}]`，ID 对应一致。root 是本机授权根的绝对路径。旧 projects/project_ids 仅作兼容输入，不能同时配置两套列表。
+- Hub 配置只用 `bindings[].folder_ids`，执行端只用 `folders=[{id,root,...}]`，ID 对应一致。root 是本机授权根的绝对路径。
 - 当前一个 Linux UID 只有一条 binding，绑定一台 executor，可授权多个根。增加第二台电脑前核对实现是否支持，不能复制同 UID 的 binding 绕过限制。
 - scope 的 user_id/profile_id/executor_id、token、可信来源共同完成配对。执行端主动连接 Hub，不依赖服务器 SSH 登录电脑。重启沿用 token、scope 和 state_path，自动复连。
 - 工具使用 folder_id；task.create 的 working_directory 是根内已有相对目录，以 `/` 分隔。省略为根 `.`，拒绝绝对路径、盘符、`..`、缺失目录和越界链接。创建后固定；附件、文件读取及产物相对该任务目录。
@@ -54,9 +54,9 @@ Windows Terminal 为默认终端时，仅对 PowerShell 使用 `-WindowStyle Hid
 
 完整适配包目录注册为来源插件，启用时保留原插件。官方 hook 为 pre_gateway_dispatch、post_gateway_admission、pre_tool_call。MCP 名为 dots_lite，七工具为 dots_lite_query、dots_lite_prepare、dots_lite_submit、dots_lite_stop、dots_lite_answer、dots_lite_approve、dots_lite_record。
 
-升级 v0.2.0 时将旧 dots_duet MCP 配置项重命名为 dots_lite，保持其他 MCP 项不变；同时更新工具筛选项和来源插件的 mcp__dots_lite__dots_lite_* 前缀。新旧工具名不并存，Hub 与适配包一起切换。已有 scope、token、数据库、环境变量和目录沿用。核对官方发现与 Tool Search 仅呈现新 MCP 项及七个新工具。
+v0.3.0 只部署当前名称和版本 3 协议。统一 MCP 项 dots_lite、插件 dots-lite、mcp__dots_lite__dots_lite_* 工具、DOTS_LITE_* 环境变量、dots-lite 目录与服务名。旧配置不进入运行时回退；已有部署先在停止写入后备份并离线转换状态，再同步切换双端。核对官方发现与 Tool Search 仅呈现当前 MCP 项及七个工具。
 
-网关父进程、MCP、worker 使用同一 profile UID、HOME、HERMES_HOME、DOTS_DUET_SOCKET、DOTS_DUET_FILES_DIR。仅给 MCP 子进程写环境变量不够，来源插件在网关父进程中运行。传输副本目录 700、文件 600，各 profile 分开。
+网关父进程、MCP、worker 使用同一 profile UID、HOME、HERMES_HOME、DOTS_LITE_SOCKET、DOTS_LITE_FILES_DIR。仅给 MCP 子进程写环境变量不够，来源插件在网关父进程中运行。传输副本目录 700、文件 600，各 profile 分开。
 
 合并配置时保留微信/其他平台、已有 MCP、模型、provider 和 Tool Search。使用运行时已有 YAML 解析器，不假定安装了 PyYAML。遇版本不兼容，核对官方接口后报告或准备升级，不修改 Hermes 核心。
 

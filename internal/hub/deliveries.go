@@ -292,7 +292,7 @@ func (h *Hub) NextDelivery(ctx context.Context, uid int) (json.RawMessage, error
 			if task.Paused || task.Version != item.TaskVersion {
 				continue
 			}
-			if item.Source != task.Source || !deliverySourceAllowed(b, task.Source) || !allowedProject(b, task.ProjectID) {
+			if item.Source != task.Source || !deliverySourceAllowed(b, task.Source) || !allowedFolder(b, task.FolderID) {
 				item.Status = "blocked"
 				item.Error = "original task delivery authorization changed"
 				if err = tx.Put("delivery", owner(b.scope()), item.ID, item); err != nil {

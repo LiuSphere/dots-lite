@@ -185,7 +185,7 @@ func (h *Hub) submitReply(ctx context.Context, b Binding, source protocol.Source
 		return nil, err
 	}
 	now := time.Now().UTC()
-	op := operationRecord{Operation: protocol.Operation{ID: id, TaskID: task.ID, Scope: b.scope(), TaskVersion: task.Version, ProjectID: task.ProjectID, WorkingDirectory: task.WorkingDirectory, ThreadID: task.ThreadID, ExpectedTurnID: task.TurnID, Action: action, RequestID: pending.RequestID, InstanceID: pending.InstanceID, Reply: reply}, Stage: "prepared", Source: source, CreatedAt: now, UpdatedAt: now}
+	op := operationRecord{Operation: protocol.Operation{ID: id, TaskID: task.ID, Scope: b.scope(), TaskVersion: task.Version, FolderID: task.FolderID, WorkingDirectory: task.WorkingDirectory, ThreadID: task.ThreadID, ExpectedTurnID: task.TurnID, Action: action, RequestID: pending.RequestID, InstanceID: pending.InstanceID, Reply: reply}, Stage: "prepared", Source: source, CreatedAt: now, UpdatedAt: now}
 	if err = h.db.Update(ctx, func(tx *store.Tx) error {
 		if err := checkAPIAttempt(tx, b, source); err != nil {
 			return err

@@ -24,8 +24,8 @@ func workingDirectory(name string) (string, error) {
 // The authorized root, not a string prefix, resolves the selected directory.
 // Its physical name is checked against the same opened directory before it is
 // used for native APIs that can accept only a path.
-func (s *Service) openTaskRootLocked(projectID, directory string) (*os.Root, string, error) {
-	p, exists := s.projectLocked(projectID)
+func (s *Service) openTaskRootLocked(folderID, directory string) (*os.Root, string, error) {
+	p, exists := s.folderLocked(folderID)
 	if !exists || !p.Available {
 		return nil, "", errors.New("authorized folder is unavailable")
 	}
@@ -33,7 +33,7 @@ func (s *Service) openTaskRootLocked(projectID, directory string) (*os.Root, str
 	if err != nil {
 		return nil, "", err
 	}
-	root, err := s.roots[projectID].OpenRoot(filepath.FromSlash(relative))
+	root, err := s.roots[folderID].OpenRoot(filepath.FromSlash(relative))
 	if err != nil {
 		return nil, "", err
 	}
@@ -60,10 +60,10 @@ func (s *Service) openTaskRootLocked(projectID, directory string) (*os.Root, str
 // service lives, the original handle also rejects replacement at that path.
 func (s *Service) taskRootLocked(ctx context.Context, task protocol.Task) (*os.Root, string, error) {
 	var expected string
-	if err := s.db.QueryRowContext(ctx, `SELECT project_root FROM executor_tasks WHERE task_id=?`, task.ID).Scan(&expected); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT folder_root FROM executor_tasks WHERE task_id=?`, task.ID).Scan(&expected); err != nil {
 		return nil, "", err
 	}
-	opened, path, err := s.openTaskRootLocked(task.ProjectID, task.WorkingDirectory)
+	opened, path, err := s.openTaskRootLocked(task.FolderID, task.WorkingDirectory)
 	if err != nil {
 		return nil, "", err
 	}

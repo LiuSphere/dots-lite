@@ -29,7 +29,7 @@ def main():
         anyio.run(serve)
         return
     home = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
-    files = Path(os.environ.get("DOTS_DUET_FILES_DIR", home / "dots-duet" / "files"))
+    files = Path(os.environ.get("DOTS_LITE_FILES_DIR", home / "dots-lite" / "files"))
     sender = NativeSender(options.hermes_python, options.hermes_source, files)
     bridge = FollowupWorker(HubClient(options.socket), RunsClient.from_token_file(options.api_url, options.api_token_file), sender)
     while True:

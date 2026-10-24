@@ -1,5 +1,5 @@
-name: dots-duet
-version: 0.2.0
+name: dots-lite
+version: 0.3.0
 description: Bind dots-lite MCP tool calls to the current trusted Hermes message context.
 provides_hooks:
   - pre_gateway_dispatch

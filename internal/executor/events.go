@@ -326,7 +326,7 @@ func (s *Service) reconcileCompletion(ctx context.Context, expected protocol.Tas
 			if rootErr != nil {
 				result = failResult(result, "working_directory_unavailable", rootErr.Error())
 			} else {
-				result = s.readFileAtRoot(ctx, protocol.Operation{TaskID: task.ID, ProjectID: task.ProjectID, Action: "files.download", Path: path}, taskRoot)
+				result = s.readFileAtRoot(ctx, protocol.Operation{TaskID: task.ID, FolderID: task.FolderID, Action: "files.download", Path: path}, taskRoot)
 			}
 			event := protocol.Event{TaskID: task.ID, InstanceID: s.instance, ThreadID: task.ThreadID, TurnID: task.TurnID, CreatedAt: time.Now().UTC()}
 			if result.Stage == "accepted" {
@@ -461,10 +461,10 @@ func (s *Service) stopTask(ctx context.Context, op protocol.Operation, client *C
 		r.Stage = "failed"
 		return failResult(r, "task_not_found", err.Error())
 	}
-	if op.ProjectID != task.ProjectID {
+	if op.FolderID != task.FolderID {
 		s.mu.Unlock()
 		r.Stage = "failed"
-		return failResult(r, "forbidden", "task belongs to a different project")
+		return failResult(r, "forbidden", "task belongs to a different folder")
 	}
 	if op.TaskVersion < task.Version {
 		s.mu.Unlock()

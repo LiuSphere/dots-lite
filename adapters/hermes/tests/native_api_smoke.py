@@ -40,8 +40,8 @@ async def smoke(home, source):
         if not durable:
             raise RuntimeError("Native run idempotency is not durable")
         identity = uuid.uuid4().hex
-        body = {"input": "Reply exactly DDL_HERMES_RUN_OK. Do not use any tools.", "session_id": "duet-test-" + identity}
-        key = "duet-smoke-" + identity
+        body = {"input": "Reply exactly DDL_HERMES_RUN_OK. Do not use any tools.", "session_id": "dots-lite-test-" + identity}
+        key = "dots-lite-smoke-" + identity
         accepted = await request("POST", "/v1/runs", body, idempotency_key=key)
         repeated = await request("POST", "/v1/runs", body, idempotency_key=key)
         if accepted["run_id"] != repeated["run_id"] or not repeated.get("replayed"):

@@ -20,7 +20,7 @@ from dots_lite_hermes.worker import FollowupWorker
 async def smoke(options):
     home = options.home.resolve()
     os.environ["HERMES_HOME"] = str(home)
-    os.environ["DOTS_DUET_SOCKET"] = options.socket
+    os.environ["DOTS_LITE_SOCKET"] = options.socket
     os.chdir(home)
     sys.path.insert(0, str(options.hermes_source.resolve()))
     from gateway.config import PlatformConfig
@@ -29,7 +29,7 @@ async def smoke(options):
 
     discover_plugins()
     plugins = get_plugin_manager().list_plugins()
-    if not any(p.get("name") == "dots-duet" and p.get("hooks") == 3 and not p.get("error") for p in plugins):
+    if not any(p.get("name") == "dots-lite" and p.get("hooks") == 3 and not p.get("error") for p in plugins):
         raise RuntimeError("Official Hermes source plugin is not loaded")
     # A full Hermes gateway performs this startup step. Direct APIServerAdapter
     # embedding must call the same official discovery entry point before admission.

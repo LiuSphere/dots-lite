@@ -114,7 +114,7 @@ func (s *Service) validRequest(ctx context.Context, op protocol.Operation) (pend
 	if err != nil {
 		return request, err
 	}
-	if task.ProjectID != op.ProjectID || task.ThreadID != request.ThreadID || task.Paused || task.Version != op.TaskVersion {
+	if task.FolderID != op.FolderID || task.ThreadID != request.ThreadID || task.Paused || task.Version != op.TaskVersion {
 		return request, fmt.Errorf("task was paused, replaced, or moved to a different version")
 	}
 	if request.TurnID != "" && task.TurnID != request.TurnID {

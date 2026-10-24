@@ -7,9 +7,8 @@ import (
 	"time"
 )
 
-// Version 2 requires task working-directory support. Version 1 executors would
-// otherwise ignore the selection and run in the authorization root.
-const Version = 2
+// Version 3 uses folder naming throughout the wire protocol.
+const Version = 3
 
 // Scope is supplied by authenticated configuration, never by a model argument.
 type Scope struct {
@@ -18,7 +17,7 @@ type Scope struct {
 	ExecutorID string `json:"executor_id"`
 }
 
-type Project struct {
+type Folder struct {
 	ID             string `json:"id"`
 	Root           string `json:"root,omitempty"`
 	Description    string `json:"description,omitempty"`
@@ -82,7 +81,7 @@ type Operation struct {
 	TaskID           string          `json:"task_id"`
 	Scope            Scope           `json:"scope"`
 	TaskVersion      int64           `json:"task_version"`
-	ProjectID        string          `json:"project_id"`
+	FolderID         string          `json:"folder_id"`
 	WorkingDirectory string          `json:"working_directory,omitempty"`
 	Action           string          `json:"action"`
 	ThreadID         string          `json:"thread_id,omitempty"`
@@ -118,7 +117,7 @@ type Task struct {
 	Scope            Scope           `json:"scope"`
 	Name             string          `json:"name"`
 	Objective        string          `json:"objective"`
-	ProjectID        string          `json:"project_id"`
+	FolderID         string          `json:"folder_id"`
 	WorkingDirectory string          `json:"working_directory,omitempty"`
 	ThreadID         string          `json:"thread_id,omitempty"`
 	TurnID           string          `json:"turn_id,omitempty"`
@@ -147,11 +146,11 @@ type Event struct {
 }
 
 type Snapshot struct {
-	InstanceID  string    `json:"instance_id"`
-	Initialized bool      `json:"initialized"`
-	Projects    []Project `json:"projects"`
-	Tasks       []Task    `json:"tasks"`
-	Error       string    `json:"error,omitempty"`
+	InstanceID  string   `json:"instance_id"`
+	Initialized bool     `json:"initialized"`
+	Folders     []Folder `json:"folders"`
+	Tasks       []Task   `json:"tasks"`
+	Error       string   `json:"error,omitempty"`
 }
 
 // Frame is the application WebSocket envelope; only its matching body is set.

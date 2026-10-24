@@ -26,13 +26,13 @@ class _UnixConnection(http.client.HTTPConnection):
 class HubClient:
     def __init__(self, socket_path, timeout=15):
         if not socket_path:
-            raise HubError("DOTS_DUET_SOCKET must name the profile's authorized hub socket")
+            raise HubError("DOTS_LITE_SOCKET must name the profile's authorized hub socket")
         self.socket_path = socket_path
         self.timeout = timeout
 
     @classmethod
     def from_environment(cls):
-        return cls(os.environ.get("DOTS_DUET_SOCKET", ""))
+        return cls(os.environ.get("DOTS_LITE_SOCKET", ""))
 
     def request(self, method, path, payload=None):
         body = None if payload is None else json.dumps(

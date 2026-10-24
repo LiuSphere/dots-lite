@@ -17,11 +17,11 @@ from dots_lite_hermes.worker import FollowupWorker
 
 
 async def smoke(options):
-    with tempfile.TemporaryDirectory(prefix="duet-channel-fixture-") as directory:
+    with tempfile.TemporaryDirectory(prefix="dots-lite-channel-fixture-") as directory:
         home = Path(directory)
         os.environ["HERMES_HOME"] = str(home)
-        os.environ["DOTS_DUET_SOCKET"] = options.socket
-        os.environ["DOTS_DUET_FILES_DIR"] = str(home / "files")
+        os.environ["DOTS_LITE_SOCKET"] = options.socket
+        os.environ["DOTS_LITE_FILES_DIR"] = str(home / "files")
         sys.path.insert(0, str(options.hermes_source.absolute()))
         os.chdir(home)
         (home / "config.yaml").write_text("""platforms:
@@ -31,12 +31,12 @@ async def smoke(options):
     extra:
       account_id: fixture-account
 plugins:
-  enabled: [weixin, dots-duet]
+  enabled: [weixin, dots-lite]
 """)
         plugins = home / "plugins"
         plugins.mkdir()
         import dots_lite_hermes
-        (plugins / "dots-duet").symlink_to(Path(dots_lite_hermes.__file__).parent, target_is_directory=True)
+        (plugins / "dots-lite").symlink_to(Path(dots_lite_hermes.__file__).parent, target_is_directory=True)
         from hermes_cli.plugins import discover_plugins, get_plugin_manager
         from hermes_cli.lifecycle import ainvoke_hook, invoke_hook
         from gateway.session import SessionSource
@@ -47,7 +47,7 @@ plugins:
         from gateway.session_ingress_media import capture_native_media
         from gateway.platform_registry import platform_registry
         discover_plugins()
-        if not any(p.get("name") == "dots-duet" and p.get("hooks") == 3 and not p.get("error")
+        if not any(p.get("name") == "dots-lite" and p.get("hooks") == 3 and not p.get("error")
                    for p in get_plugin_manager().list_plugins()):
             raise RuntimeError("Official PluginManager did not load all three trusted-source hooks")
         hub = HubClient(options.socket)
@@ -92,7 +92,7 @@ plugins:
             raise RuntimeError("Official retained ingress media did not preserve fixture bytes")
         output_name = "delivery-fixture-" + uuid.uuid4().hex + ".bin"
         args = {
-            "action": "task.create", "project_id": options.project, "name": "binary-channel-fixture",
+            "action": "task.create", "folder_id": options.folder, "name": "binary-channel-fixture",
             "input": "Copy the attached input.bin byte for byte to " + output_name + ". Do not modify or decode its binary bytes. Verify SHA-256 " + digest + ". Do not do any other work. Reply COPY_OK.",
             "inputs": [{"name": "input.bin", "local_path": retained["path"]}], "artifacts": [output_name],
         }
@@ -192,7 +192,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--hermes-source", required=True, type=Path)
     parser.add_argument("--socket", required=True)
-    parser.add_argument("--project", default="acceptance")
+    parser.add_argument("--folder", default="acceptance")
     parser.add_argument("--report", required=True, type=Path)
     parser.add_argument("--timeout", type=int, default=180)
     asyncio.run(smoke(parser.parse_args()))

@@ -48,11 +48,11 @@ func (h *Hub) retryFollowup(tx *store.Tx, b Binding, task *taskRecord, previous 
 	if err != nil {
 		return nil, err
 	}
-	session, err := randomID("duet_api_")
+	session, err := randomID("dots_lite_api_")
 	if err != nil {
 		return nil, err
 	}
-	key, err := randomID("duet_event_")
+	key, err := randomID("dots_lite_event_")
 	if err != nil {
 		return nil, err
 	}
