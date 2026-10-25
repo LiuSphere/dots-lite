@@ -180,6 +180,12 @@ func TestControlPipeWaitsForReplyReceiptAndSurvivesDelayedClientClose(t *testing
 			time.Sleep(10 * time.Millisecond)
 		}
 		file := os.NewFile(uintptr(handle), "slow-controller")
+		if i < 2 {
+			// An abandoned connection must not retire the service's only
+			// control listener before the next controller arrives.
+			file.Close()
+			continue
+		}
 		_ = file.SetDeadline(time.Now().Add(time.Second))
 		dec := json.NewDecoder(io.LimitReader(file, 16384))
 		enc := json.NewEncoder(file)

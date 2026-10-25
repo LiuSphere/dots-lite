@@ -89,7 +89,18 @@ func serveMaintenance(ctx context.Context, configPath string, cfg serviceConfig,
 				mu.Lock()
 				_ = windows.CloseHandle(handle)
 				active = 0
-				mu.Unlock()
+				if !closed && ctx.Err() == nil && (errors.Is(err, windows.ERROR_NO_DATA) || errors.Is(err, windows.ERROR_BROKEN_PIPE) || errors.Is(err, windows.ERROR_PIPE_NOT_CONNECTED)) {
+					active, err = create()
+					mu.Unlock()
+					if err == nil {
+						continue
+					}
+				} else {
+					mu.Unlock()
+				}
+				if ctx.Err() == nil {
+					fmt.Fprintln(os.Stderr, "maintenance pipe connection:", err)
+				}
 				return
 			}
 			file := os.NewFile(uintptr(handle), "dots-lite-control")
