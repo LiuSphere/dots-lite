@@ -98,14 +98,16 @@ func serveMaintenance(ctx context.Context, configPath string, cfg serviceConfig,
 			mu.Unlock()
 			_ = file.SetDeadline(time.Now().Add(45 * time.Second))
 			identity := maintenanceReply{Scope: cfg.Scope, ConfigurationID: configurationID(cfg), PID: os.Getpid(), State: service.MaintenanceStatus()}
-			identityErr:=json.NewEncoder(file).Encode(identity)
+			identityErr := json.NewEncoder(file).Encode(identity)
 			var command struct {
 				Action          string         `json:"action"`
 				Scope           protocol.Scope `json:"scope"`
 				ConfigurationID string         `json:"configuration_id"`
 			}
-			decodeErr:=identityErr
-			if decodeErr==nil{decodeErr=json.NewDecoder(io.LimitReader(file,4096)).Decode(&command)}
+			decodeErr := identityErr
+			if decodeErr == nil {
+				decodeErr = json.NewDecoder(io.LimitReader(file, 4096)).Decode(&command)
+			}
 			var actionErr error
 			if decodeErr != nil {
 				actionErr = decodeErr
@@ -298,7 +300,10 @@ $full=$env:DOTS_CONTROL_TASK
 $parent=Split-Path $full -Parent
 if (!$parent) {$parent='\'} elseif (!$parent.EndsWith('\')) {$parent+='\'}
 $task=Get-ScheduledTask -TaskName (Split-Path $full -Leaf) -TaskPath $parent
-$sid=$task.Principal.UserId
+# Named export reads the registered SID; piping the task summary can serialize
+# its unqualified display name instead, which needs account environment to map.
+$registered=[xml](Export-ScheduledTask -TaskName $task.TaskName -TaskPath $task.TaskPath)
+$sid=[string]$registered.Task.Principals.Principal.UserId
 if (!$sid.StartsWith('S-1-')) {$sid=([System.Security.Principal.NTAccount]::new($sid)).Translate([System.Security.Principal.SecurityIdentifier]).Value}
 if ($sid -ne [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {throw 'Scheduled task owner differs'}
 if (@($task.Actions).Count -ne 1 -or $task.Actions[0].Execute -ne $env:DOTS_CONTROL_EXE -or $task.Actions[0].Arguments -cne $env:DOTS_CONTROL_ARGS) {throw 'Scheduled task launch command differs'}

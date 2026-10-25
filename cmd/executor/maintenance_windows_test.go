@@ -121,3 +121,26 @@ func TestControlHandshakeRejectsConfigurationDriftBeforePausing(t *testing.T) {
 		_ = windows.CloseHandle(process)
 	}
 }
+
+func TestInstalledScheduledTaskUsesRegisteredIdentityWithoutAccountEnvironment(t *testing.T) {
+	path := os.Getenv("DOTS_LITE_WINDOWS_TASK_AUDIT")
+	if path == "" {
+		t.Skip("set DOTS_LITE_WINDOWS_TASK_AUDIT to a disabled, stopped installation configuration for a read-only scheduler check")
+	}
+	cfg, err := readServiceConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"COMPUTERNAME", "USERDOMAIN", "USERNAME"} {
+		t.Setenv(name, "")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := scheduledTask(ctx, cfg, "offline"); err != nil {
+		t.Fatalf("registered owner could not be verified without account environment: %v", err)
+	}
+	cfg.Maintenance.TaskExecutable += ".wrong"
+	if err := scheduledTask(ctx, cfg, "offline"); err == nil {
+		t.Fatal("scheduler accepted a different registered launch command")
+	}
+}
