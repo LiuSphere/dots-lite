@@ -4,12 +4,13 @@
 
 ## 绑定与工作目录
 
-协议 4 的 task/allowlist 模式见本文末节。下列 folders 与相对目录规则适用于 allowlist 和旧协议 3；部署时按 [SKILL.md 第 0 节](../SKILL.md#0-目录授权与默认权限)核对版本及模式，不通过扩大根目录模拟新机制。
+先按 [SKILL.md 第 0 节](../SKILL.md#0-目录授权与默认权限)核对版本及目录模式，再收集对应参数。协议 4 的配置与迁移见本文末节。
 
-- Hub 配置只用 `bindings[].folder_ids`，执行端只用 `folders=[{id,root,...}]`，ID 对应一致。root 是本机授权根的绝对路径。
+- 协议 4 新装 task 模式不要求 folders/folder_ids。新任务使用当前可信消息明确选择的已有绝对目录，已有会话使用原 cwd；部署目录不自动获得任务授权。
+- allowlist 模式在 Hub 设置 `bindings[].folder_ids`，执行端设置 `folders=[{id,root,...}]`，ID 对应一致。root 是本机授权根的绝对路径；旧安装保留原根。
 - 当前一个 Linux UID 只有一条 binding，绑定一台 executor，可授权多个根。增加第二台电脑前核对实现是否支持，不能复制同 UID 的 binding 绕过限制。
 - scope 的 user_id/profile_id/executor_id、token、可信来源共同完成配对。执行端主动连接 Hub，不依赖服务器 SSH 登录电脑。重启沿用 token、scope 和 state_path，自动复连。
-- 工具使用 folder_id；task.create 的 working_directory 是根内已有相对目录，以 `/` 分隔。省略为根 `.`，拒绝绝对路径、盘符、`..`、缺失目录和越界链接。创建后固定；附件、文件读取及产物相对该任务目录。
+- 协议 4 的 task.create 使用绝对 working_directory；allowlist 模式仍核对其位于指定 folder_id 的真实根内。旧协议 3 只接受根内相对目录，使用 `/` 分隔，省略为 `.`。两种协议都拒绝缺失目录、越界和对象替换；创建后固定任务目录，附件和文件操作相对它进行。
 - 多个授权根生成独立稳定 ID，检查实际路径与重叠。启动脚本的校验须使用本次完整清单，不能复制只接受某个历史单项目的脚本。
 
 ## 版本、构建与回滚
@@ -38,7 +39,17 @@ Hub 使用 systemd。核对启用状态、真实 UID、监听、进程及启动�
 
 用当前普通用户自己的 Codex 和 CODEX_HOME。默认登录触发、Limited、Interactive、隐藏、单实例；失败重启按已确认维护方案设置。常驻任务不应到默认时长后被杀。
 
-Windows Terminal 为默认终端时，仅对 PowerShell 使用 `-WindowStyle Hidden` 仍可能留下可见窗口。将[WindowsServiceLauncher.cs](../assets/WindowsServiceLauncher.cs)以 Windows .NET Framework C# 编译器的 `/target:winexe` 编译到服务 bin 目录，计划任务调用这个 GUI 子系统程序，参数为 PowerShell 与启动脚本的两个绝对路径，各自加引号。具体编译命令见仓库运行指南；编译器缺失时报告依赖，不退回已经失败的直接 PowerShell 入口。
+Windows Terminal 为默认终端时，仅对 PowerShell 使用 `-WindowStyle Hidden` 仍可能留下可见窗口。将[WindowsServiceLauncher.cs](../assets/WindowsServiceLauncher.cs)编译到服务 bin 目录，计划任务调用这个 GUI 子系统程序，参数为 PowerShell 与启动脚本的两个绝对路径，各自加引号。在已确定源码和安装目录后执行：
+
+```powershell
+$compiler = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+$launcherSource = Join-Path $sourceRoot 'skills/dots-lite-deploy/assets/WindowsServiceLauncher.cs'
+$launcherOutput = Join-Path $installRoot 'bin/WindowsServiceLauncher.exe'
+& $compiler /nologo /target:winexe "/out:$launcherOutput" $launcherSource
+if ($LASTEXITCODE -ne 0) { throw 'Launcher build failed' }
+```
+
+`$sourceRoot` 和 `$installRoot` 必须来自本次已核对参数；编译器缺失时报告依赖，不退回已经失败的直接 PowerShell 入口。已有安装核对原 launcher 后可复用。
 
 启动入口使用 `UseShellExecute=false`、`CreateNoWindow=true`，等待 PowerShell 并传回原退出码；自身启动失败写入 `..\logs\launcher-host.log` 并返回 1。脚本再以无窗口方式启动执行端、保存 stdout/stderr，并等待执行端。常驻脚本等待是正常生命周期，不能让它提前退出或丢弃失败状态来关闭窗口。停止时核对 owned 进程，保留无关会话；不修改用户全局终端选择。
 
@@ -64,7 +75,7 @@ v0.3.0 使用协议 3；当前 0.4.0.dev0 源码使用协议 4，部署包必须
 
 原生 API 仅回环监听，每个 profile 独立端口与随机 token。带认证 capabilities 必须报告 runs_idempotency supported=true、durable=true，且 retention_seconds 为正。worker 的 token 文件存同一裸 token，权限 600；URL 使用 API 根地址，指定实际 Hermes Python 与源码。
 
-以实际 UID 做 MCP stdio initialize/list_tools，检查 folders、folder_id、working_directory 字段及官方 discovery/Tool Search 可见性。工具列表成功不证明来源绑定或模型实际调用。
+以实际 UID 及服务声明的补充组做 MCP stdio initialize/list_tools，核对当前版本的目录字段、threads/thread 查询、task.attach 和官方 discovery/Tool Search 可见性。来源插件的私有选择不能变成模型可伪造的参数。工具列表成功不证明来源绑定或模型实际调用。
 
 真实来源从用户选定聊天的原生允许来源、会话或接入流程核对；多个候选时请用户确认。昵称、账号和 profile 名不是稳定来源 ID，生产绑定不能用 fixture。
 

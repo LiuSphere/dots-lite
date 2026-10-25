@@ -1,4 +1,4 @@
 interface:
   display_name: "dots-lite 部署"
-  short_description: "说明目录授权与默认执行权限，按版本收集参数并完成后台部署与配对验证"
-  default_prompt: "使用 $dots-lite-deploy 部署或更新 dots-lite，先核对版本并说明目录授权和默认权限，再收集缺少的部署参数与当前实现需要的目录范围。"
+  short_description: "部署协议 4、原生会话及维护脚本，保留旧目录限制并核对迁移结果"
+  default_prompt: "使用 $dots-lite-deploy 部署或更新 dots-lite。核对协议、目录模式与实际权限；沿用已授权身份和原配置，准备一致备份，协调双端及适配包迁移，并核对暂停恢复和实际连接。"
