@@ -126,6 +126,17 @@ func serveMaintenance(ctx context.Context, configPath string, cfg serviceConfig,
 				reply.Error = actionErr.Error()
 			}
 			writeErr := json.NewEncoder(file).Encode(reply)
+			if writeErr == nil {
+				// Closing a Windows pipe can discard an unread reply. Wait for
+				// the controller to confirm receipt before closing this instance.
+				var ack struct {
+					Received bool `json:"received"`
+				}
+				writeErr = json.NewDecoder(io.LimitReader(file, 256)).Decode(&ack)
+				if writeErr == nil && !ack.Received {
+					writeErr = errors.New("maintenance reply was not acknowledged")
+				}
+			}
 			mu.Lock()
 			active = 0
 			activeFile = nil
@@ -139,15 +150,29 @@ func serveMaintenance(ctx context.Context, configPath string, cfg serviceConfig,
 			if wasClosed || ctx.Err() != nil {
 				return
 			}
-			mu.Lock()
-			if closed {
+			// FIRST_PIPE_INSTANCE also sees a disconnected client handle until
+			// that client closes it. Allow its acknowledged connection to finish.
+			deadline := time.Now().Add(time.Second)
+			for {
+				mu.Lock()
+				if closed {
+					mu.Unlock()
+					return
+				}
+				active, err = create()
 				mu.Unlock()
-				return
-			}
-			active, err = create()
-			mu.Unlock()
-			if err != nil {
-				return
+				if err == nil {
+					break
+				}
+				if !errors.Is(err, windows.ERROR_ACCESS_DENIED) || time.Now().After(deadline) {
+					fmt.Fprintln(os.Stderr, "maintenance control listener:", err)
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(20 * time.Millisecond):
+				}
 			}
 		}
 	}()
@@ -282,6 +307,9 @@ func dialControl(ctx context.Context, path, action string) (maintenanceReply, wi
 	}
 	if reply.PID != int(pid) {
 		return reply, 0, errors.New("control server identity changed")
+	}
+	if err := json.NewEncoder(file).Encode(map[string]bool{"received": true}); err != nil {
+		return reply, 0, err
 	}
 	if reply.Error != "" {
 		return reply, 0, errors.New(reply.Error)

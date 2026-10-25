@@ -8,6 +8,7 @@ import (
 	"dots-lite/internal/protocol"
 	"encoding/json"
 	"golang.org/x/sys/windows"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -142,5 +143,70 @@ func TestInstalledScheduledTaskUsesRegisteredIdentityWithoutAccountEnvironment(t
 	cfg.Maintenance.TaskExecutable += ".wrong"
 	if err := scheduledTask(ctx, cfg, "offline"); err == nil {
 		t.Fatal("scheduler accepted a different registered launch command")
+	}
+}
+
+func TestControlPipeWaitsForReplyReceiptAndSurvivesDelayedClientClose(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	path := filepath.Join(root, "executor.json")
+	cfg := serviceConfig{Scope: protocol.Scope{UserID: "test", ProfileID: "test", ExecutorID: "slow-controller"}}
+	raw, _ := json.Marshal(cfg)
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	service, err := executor.NewService(executor.ServiceConfig{Scope: cfg.Scope, StatePath: filepath.Join(root, "state.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	closeControl, err := serveMaintenance(ctx, path, cfg, service, func() { t.Error("status requested shutdown") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeControl()
+	name, _ := windows.UTF16PtrFromString(pipeName(path))
+	for i := 0; i < 10; i++ {
+		var handle windows.Handle
+		for {
+			handle, err = windows.CreateFile(name, windows.GENERIC_READ|windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OVERLAPPED, 0)
+			if err == nil {
+				break
+			}
+			if ctx.Err() != nil {
+				t.Fatalf("listener did not return after client %d: %v", i, err)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		file := os.NewFile(uintptr(handle), "slow-controller")
+		_ = file.SetDeadline(time.Now().Add(time.Second))
+		dec := json.NewDecoder(io.LimitReader(file, 16384))
+		enc := json.NewEncoder(file)
+		var reply maintenanceReply
+		if err := dec.Decode(&reply); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+		if err := enc.Encode(map[string]any{"action": "status", "scope": cfg.Scope, "configuration_id": configurationID(cfg)}); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+		time.Sleep(15 * time.Millisecond)
+		if err := dec.Decode(&reply); err != nil {
+			file.Close()
+			t.Fatalf("reply was discarded before controller read: %v", err)
+		}
+		if err := enc.Encode(map[string]bool{"received": true}); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+		time.Sleep(40 * time.Millisecond)
+		file.Close()
+	}
+	if _, process, err := dialControl(ctx, path, "status"); err != nil {
+		t.Fatalf("listener did not survive repeated delayed controllers: %v", err)
+	} else {
+		_ = windows.CloseHandle(process)
 	}
 }
