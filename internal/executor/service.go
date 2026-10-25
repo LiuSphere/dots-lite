@@ -184,11 +184,17 @@ func NewService(config ServiceConfig) (*Service, error) {
 }
 
 func (s *Service) StartNative(ctx context.Context) error {
+	return s.startNative(ctx, false)
+}
+
+// Only an explicit pause may initialize native inspection while admission stays
+// closed. This lets a failed maintenance operation be checked after a restart.
+func (s *Service) startNative(ctx context.Context, inspection bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	s.mu.Lock()
-	if s.maintenance.Phase != "running" && s.maintenance.Phase != "resuming" {
+	if (inspection && s.maintenance.Phase != "quiescing") || (!inspection && s.maintenance.Phase != "running" && s.maintenance.Phase != "resuming") {
 		s.mu.Unlock()
 		return errors.New("native restart is disabled during maintenance")
 	}
@@ -224,7 +230,7 @@ func (s *Service) StartNative(ctx context.Context) error {
 		cancel()
 		return err
 	}
-	if s.maintenance.Phase != "running" && s.maintenance.Phase != "resuming" {
+	if (inspection && s.maintenance.Phase != "quiescing") || (!inspection && s.maintenance.Phase != "running" && s.maintenance.Phase != "resuming") {
 		cancel()
 		return errors.Join(errors.New("maintenance began during native initialization"), client.Close())
 	}

@@ -533,6 +533,31 @@ func (s *Service) stopTask(ctx context.Context, op protocol.Operation, client *C
 	if err != nil {
 		return failResult(r, "native", err.Error())
 	}
+	if status == "notLoaded" {
+		// notLoaded is local state, not proof that another instance is idle.
+		// Acquire native writer protection without starting a turn, then verify
+		// actual state. An uncertain older write must settle before this step.
+		var pending int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM executor_operations WHERE operation_id<>? AND json_extract(result,'$.task_id')=? AND json_extract(result,'$.stage') IN ('unknown','dispatched') AND (action='' OR action IN ('task.create','task.continue','turn.steer','goal.set','approval.respond','question.respond','files.upload'))`, op.ID, task.ID).Scan(&pending); err != nil {
+			return failResult(r, "storage", err.Error())
+		}
+		if pending > 0 {
+			return failResult(r, "stop_unconfirmed", "an older native write must settle before protected loading")
+		}
+		s.mu.Lock()
+		_, cwd, rootErr := s.taskRootLocked(ctx, task)
+		s.mu.Unlock()
+		if rootErr != nil {
+			return failResult(r, "stop_unconfirmed", rootErr.Error())
+		}
+		if _, err := s.resumePreservingPolicy(ctx, client, op, task, cwd); err != nil {
+			return failResult(r, "stop_unconfirmed", err.Error())
+		}
+		status, err = readNativeStatus(ctx, client, task.ThreadID)
+		if err != nil {
+			return failResult(r, "native", err.Error())
+		}
+	}
 	var interruptErr error
 	if status != "idle" {
 		if status != "active" || task.TurnID == "" {

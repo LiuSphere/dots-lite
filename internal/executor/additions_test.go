@@ -122,6 +122,64 @@ func TestUnsafeNativeAttachmentReportsReasonAndNeverStartsTurn(t *testing.T) {
 	}
 }
 
+func TestMaintenanceLoadsUnloadedTaskUnderNativeWriterProtectionWithoutStartingTurn(t *testing.T) {
+	for _, mode := range []string{"idle", "writer-conflict"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			s, cfg, root := nativeSessionsService(t, "idle")
+			op := protocol.Operation{ID: "attach-before-restart", TaskID: "bound", Scope: cfg.Scope, Action: "task.attach", ThreadID: "native-1", WorkingDirectory: root, TaskVersion: 1}
+			if result := s.Execute(ctx, op); result.Stage != "accepted" {
+				t.Fatalf("initial attachment: %+v", result)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			cfg.Native.Command[len(cfg.Native.Command)-1] = mode
+			restarted, err := executor.NewService(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restarted.Close()
+			if err := restarted.StartNative(ctx); err != nil {
+				t.Fatal(err)
+			}
+			err = restarted.PauseForMaintenance(ctx)
+			if mode == "idle" && err != nil {
+				t.Fatalf("unloaded idle task blocked maintenance: %v", err)
+			}
+			if mode == "writer-conflict" && (err == nil || !strings.Contains(err.Error(), "active writer")) {
+				t.Fatalf("another writer was treated as idle: %v", err)
+			}
+			if mode == "writer-conflict" {
+				if err := restarted.Close(); err != nil {
+					t.Fatal(err)
+				}
+				cfg.Native.Command[len(cfg.Native.Command)-1] = "idle"
+				recovered, err := executor.NewService(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer recovered.Close()
+				if err := recovered.StartNative(ctx); err == nil {
+					t.Fatal("failed maintenance automatically restarted native work")
+				}
+				if err := recovered.PauseForMaintenance(ctx); err != nil {
+					t.Fatalf("explicit retry could not inspect and finish the original pause: %v", err)
+				}
+				restarted = recovered
+			}
+			if _, err := os.Stat(filepath.Join(root, "turns.txt")); !os.IsNotExist(err) {
+				t.Fatal("maintenance started a model turn")
+			}
+			snapshot, err := restarted.Snapshot(ctx)
+			if err != nil || !snapshot.Tasks[0].Paused {
+				t.Fatalf("pause was lost: %+v %v", snapshot, err)
+			}
+		})
+	}
+}
+
 func TestTaskModeDoesNotNeedFolderRegistrationAndPersistsDirectoryIdentity(t *testing.T) {
 	cfg := serviceConfig(t)
 	cfg.DirectoryMode = "task"

@@ -125,6 +125,19 @@ func (s *Service) PauseForMaintenance(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	missingClient := s.client == nil
+	s.mu.Unlock()
+	if missingClient {
+		for _, task := range initial.Tasks {
+			if task.ThreadID != "" {
+				if err := s.startNative(ctx, true); err != nil {
+					return fmt.Errorf("initialize native inspection for the pending pause: %w", err)
+				}
+				break
+			}
+		}
+	}
 	for _, task := range initial.Tasks {
 		if task.ThreadID == "" {
 			continue
