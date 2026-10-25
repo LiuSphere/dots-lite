@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -83,9 +84,44 @@ func (p *processControl) started(cmd *exec.Cmd) (err error) {
 	return errors.New("suspended app-server initial thread was not found")
 }
 
-// Closing the last handle terminates every descendant associated with the job.
+// Keep the job handle until accounting confirms that its descendants exited.
 func (p *processControl) close() error {
-	p.once.Do(func() { p.err = windows.CloseHandle(p.job) })
+	p.once.Do(func() {
+		defer func() { p.err = errors.Join(p.err, windows.CloseHandle(p.job)) }()
+		type accounting struct {
+			TotalUserTime, TotalKernelTime, PeriodUserTime, PeriodKernelTime int64
+			PageFaults, TotalProcesses, ActiveProcesses, TerminatedProcesses uint32
+		}
+		query := func() (uint32, error) {
+			var info accounting
+			err := windows.QueryInformationJobObject(p.job, windows.JobObjectBasicAccountingInformation, uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), nil)
+			return info.ActiveProcesses, err
+		}
+		active, err := query()
+		if err != nil {
+			p.err = err
+			return
+		}
+		if active == 0 {
+			return
+		}
+		if err := windows.TerminateJobObject(p.job, 1); err != nil {
+			p.err = err
+			return
+		}
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+			active, err = query()
+			if err != nil {
+				p.err = err
+				return
+			}
+			if active == 0 {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		p.err = errors.New("owned native descendants have not all exited")
+	})
 	return p.err
 }
 

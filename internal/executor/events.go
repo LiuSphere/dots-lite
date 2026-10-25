@@ -39,7 +39,7 @@ func (s *Service) pumpNative(client *Client) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.nativeErr = errors.Join(s.nativeErr, client.Err())
-	if err := s.recordNativeExit(context.Background(), errors.Join(s.eventFault, client.Err())); err != nil {
+	if err := s.recordNativeUnavailable(context.Background(), errors.Join(s.eventFault, client.Err()), "task/native_exited"); err != nil {
 		s.failNativeEventsLocked(err)
 	}
 }
@@ -52,7 +52,7 @@ func (s *Service) failNativeEventsLocked(err error) {
 	}
 }
 
-func (s *Service) recordNativeExit(ctx context.Context, cause error) (err error) {
+func (s *Service) recordNativeUnavailable(ctx context.Context, cause error, eventType string) (err error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM executor_tasks WHERE occupied=1 OR json_extract(payload,'$.waiting')<>''`)
 	if err != nil {
 		return err
@@ -100,7 +100,7 @@ func (s *Service) recordNativeExit(ctx context.Context, cause error) (err error)
 		if cause != nil {
 			message = cause.Error()
 		}
-		event := protocol.Event{TaskID: task.ID, InstanceID: s.instance, ThreadID: task.ThreadID, TurnID: task.TurnID, Type: "task/native_exited", Data: mustJSON(map[string]any{"task": task, "native_status": "unknown", "error": protocol.Error{Code: "native_exited", Message: message}}), CreatedAt: time.Now().UTC()}
+		event := protocol.Event{TaskID: task.ID, InstanceID: s.instance, ThreadID: task.ThreadID, TurnID: task.TurnID, Type: eventType, Data: mustJSON(map[string]any{"task": task, "native_status": "unknown", "error": protocol.Error{Code: strings.TrimPrefix(eventType, "task/"), Message: message}}), CreatedAt: time.Now().UTC()}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO executor_events(payload) VALUES(?)`, string(mustJSON(event))); err != nil {
 			return err
 		}
@@ -113,6 +113,9 @@ func (s *Service) handleNative(message Message) (err error) {
 		return nil
 	}
 	var params struct {
+		Goal struct {
+			Status string `json:"status"`
+		} `json:"goal"`
 		ThreadID  string          `json:"threadId"`
 		TurnID    string          `json:"turnId"`
 		RequestID json.RawMessage `json:"requestId"`
@@ -193,6 +196,11 @@ func (s *Service) handleNative(message Message) (err error) {
 	}
 	data := message.Params
 	keyEvent := false
+	nativePaused := message.Method == "thread/goal/updated" && params.Goal.Status == "paused" && !task.Paused
+	if nativePaused {
+		task.Paused = true
+		task.Version++
+	}
 	if len(message.ID) > 0 {
 		if task.TurnID == "" && params.TurnID != "" {
 			task.TurnID = params.TurnID
@@ -225,6 +233,12 @@ func (s *Service) handleNative(message Message) (err error) {
 	}
 	if keyEvent {
 		event := protocol.Event{TaskID: task.ID, InstanceID: s.instance, ThreadID: task.ThreadID, TurnID: task.TurnID, Type: message.Method, Data: data, CreatedAt: time.Now().UTC()}
+		if _, err := tx.Exec(`INSERT INTO executor_events(payload) VALUES(?)`, string(mustJSON(event))); err != nil {
+			return err
+		}
+	}
+	if nativePaused {
+		event := protocol.Event{TaskID: task.ID, InstanceID: s.instance, ThreadID: task.ThreadID, TurnID: task.TurnID, Type: "task/native_paused", Data: mustJSON(map[string]any{"task": task, "reason": "native Goal paused"}), CreatedAt: time.Now().UTC()}
 		if _, err := tx.Exec(`INSERT INTO executor_events(payload) VALUES(?)`, string(mustJSON(event))); err != nil {
 			return err
 		}
@@ -438,6 +452,17 @@ func (s *Service) AckEvents(ctx context.Context, sequence int64) error {
 		return errors.New("event acknowledgement exceeds emitted sequence")
 	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM executor_events WHERE sequence<=?`, sequence)
+	if err == nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.maintenance.RemoteSyncPending {
+			var pending int
+			if err = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM executor_events WHERE json_extract(payload,'$.type')='executor/maintenance'`).Scan(&pending); err == nil && pending == 0 {
+				s.maintenance.RemoteSyncPending = false
+				err = s.persistMaintenanceLocked(ctx, s.maintenance.Phase, nil)
+			}
+		}
+	}
 	return err
 }
 func (s *Service) applyLatePause(ctx context.Context, op protocol.Operation, task protocol.Task, client *Client) protocol.Result {

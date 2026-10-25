@@ -136,37 +136,79 @@ func (h *Hub) saveReconciliationError(ctx context.Context, b Binding, id string,
 	})
 }
 func (h *Hub) applySnapshot(ctx context.Context, b Binding, snapshot protocol.Snapshot) error {
-	return h.db.Update(ctx, func(tx *store.Tx) error {
-		for _, native := range snapshot.Tasks {
-			task, err := loadTask(tx, b, native.ID)
-			if err != nil {
-				var failure *protocol.Error
-				if errors.As(err, &failure) && failure.Code == "not_found" {
-					continue
-				}
-				return err
-			}
-			if native.Scope != b.scope() {
-				return failure("scope_mismatch", "snapshot task scope mismatch")
-			}
-			if native.Version != task.Version {
+	err := h.db.Update(ctx, func(tx *store.Tx) error { return applySnapshotTx(tx, b, snapshot) })
+	if err == nil {
+		h.mu.Lock()
+		h.maintenance[b.ExecutorID] = snapshot.Maintenance
+		h.mu.Unlock()
+	}
+	return err
+}
+
+func applySnapshotTx(tx *store.Tx, b Binding, snapshot protocol.Snapshot) error {
+	switch snapshot.Maintenance.Phase {
+	case "running", "quiescing", "stopping", "stopped", "resuming", "failed":
+	case "":
+		if snapshot.Maintenance.Epoch != 0 {
+			return failure("invalid_maintenance", "nonzero epoch requires a known phase")
+		}
+	default:
+		return failure("invalid_maintenance", "unknown maintenance phase")
+	}
+	var previous protocol.Maintenance
+	err := tx.Get("maintenance", owner(b.scope()), "executor", &previous)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	if snapshot.Maintenance.Epoch < previous.Epoch {
+		return failure("stale_maintenance", "snapshot belongs to an older maintenance epoch")
+	}
+	if snapshot.Maintenance.Epoch == previous.Epoch && previous.Phase != "" && previous.Phase != "running" && previous.Phase != "resuming" && snapshot.Maintenance.Phase == "running" {
+		return failure("stale_maintenance", "a new epoch is required to leave maintenance")
+	}
+	if err := tx.Put("maintenance", owner(b.scope()), "executor", snapshot.Maintenance); err != nil {
+		return err
+	}
+
+	for _, native := range snapshot.Tasks {
+		task, err := loadTask(tx, b, native.ID)
+		if err != nil {
+			var failure *protocol.Error
+			if errors.As(err, &failure) && failure.Code == "not_found" {
 				continue
 			}
-			if native.ThreadID != "" {
-				task.ThreadID = native.ThreadID
+			return err
+		}
+		if native.Scope != b.scope() {
+			return failure("scope_mismatch", "snapshot task scope mismatch")
+		}
+		if native.Version > task.Version && native.Paused {
+			task.Version = native.Version
+			task.Paused = true
+		}
+		if native.Version != task.Version {
+			continue
+		}
+		if native.ThreadID != "" {
+			if task.ThreadID != "" && task.ThreadID != native.ThreadID {
+				return failure("binding_conflict", "snapshot cannot replace an existing native thread")
 			}
-			if native.TurnID != "" {
-				task.TurnID = native.TurnID
-			}
-			if native.Version == task.Version {
-				task.Execution = native.Execution
+			task.ThreadID = native.ThreadID
+		}
+		if native.TurnID != "" {
+			task.TurnID = native.TurnID
+		}
+		if native.Version == task.Version {
+			task.Execution = native.Execution
+			if !businessWaiting(task.Waiting) {
 				task.Waiting = native.Waiting
 			}
-			task.UpdatedAt = time.Now().UTC()
-			if err = tx.Put("task", owner(b.scope()), task.ID, task); err != nil {
-				return err
-			}
+			task.NativePolicy, task.ModelProvider, task.Model = native.NativePolicy, native.ModelProvider, native.Model
 		}
-		return nil
-	})
+		task.UpdatedAt = time.Now().UTC()
+		if err = tx.Put("task", owner(b.scope()), task.ID, task); err != nil {
+			return err
+		}
+	}
+	return nil
 }

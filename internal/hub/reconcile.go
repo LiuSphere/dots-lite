@@ -43,13 +43,13 @@ func (h *Hub) Reconcile(ctx context.Context) error {
 				if err = json.Unmarshal(raw, &task); err != nil {
 					return err
 				}
-				if task.Execution == "prepared" || task.Paused || task.Waiting == "user_decision" || task.Waiting == "recovery_budget_exhausted" || time.Now().Before(task.NextReconcileAt) {
+				if task.Execution == "prepared" || task.Paused || h.now().Before(task.NextReconcileAt) {
 					continue
 				}
 				if task.Execution == "completed" && task.Verification == "passed" && (len(task.Artifacts) == 0 || task.Delivery == "delivered") {
 					continue
 				}
-				task.NextReconcileAt = time.Now().UTC().Add(30 * time.Second)
+				task.NextReconcileAt = h.now().UTC().Add(30 * time.Second)
 				if err = tx.Put("task", owner(b.scope()), task.ID, task); err != nil {
 					return err
 				}
@@ -149,7 +149,7 @@ func (h *Hub) reconcileTask(ctx context.Context, b Binding, observed taskRecord)
 			if progress.IsZero() {
 				progress = observed.CreatedAt
 			}
-			if reason == "" && time.Since(progress) >= 5*time.Minute {
+			if reason == "" && goal.Goal == nil && native.Native.Thread.Status.Type != "active" && h.now().Sub(progress) >= 5*time.Minute {
 				reason = "no_progress"
 			}
 		}
@@ -162,13 +162,36 @@ func (h *Hub) reconcileTask(ctx context.Context, b Binding, observed taskRecord)
 		if err != nil {
 			return err
 		}
-		if task.Version != observed.Version || task.Paused || task.TurnID != observed.TurnID || task.Waiting == "user_decision" || task.Waiting == "recovery_budget_exhausted" {
+		if task.Version != observed.Version || task.Paused || task.TurnID != observed.TurnID || task.Waiting == "user_decision" || task.Waiting == "submission_unknown" || task.Waiting == "migration_review" {
 			return nil
 		}
+		priorWaiting := task.Waiting
 		if nativeValid {
 			task.Execution, task.Waiting = native.Task.Execution, native.Task.Waiting
 			if native.Task.TurnID != "" {
 				task.TurnID = native.Task.TurnID
+			}
+		}
+		if priorWaiting == "recovery_budget_exhausted" {
+			task.Waiting = priorWaiting
+		}
+		if nativeValid && readErr == nil {
+			task.GoalActive = goal.Goal != nil && goal.Goal.Status == "active"
+			if observed.Execution == "unknown" && (native.Native.Thread.Status.Type == "idle" || native.Native.Thread.Status.Type == "active") {
+				closed, err := closeTaskFaults(tx, b, task, true, "native runtime and Goal reads confirmed recovery")
+				if err != nil {
+					return err
+				}
+				if closed && task.Waiting == "recovery_budget_exhausted" {
+					task.Waiting = ""
+				}
+			}
+			goalStatus := "none"
+			if goal.Goal != nil {
+				goalStatus = goal.Goal.Status
+			}
+			if err := h.wakeWaiting(tx, b, task, native.Native.Thread.Status.Type, goalStatus, h.now().UTC()); err != nil {
+				return err
 			}
 		}
 		if reason != "" {
@@ -201,7 +224,7 @@ func (h *Hub) reconcileTask(ctx context.Context, b Binding, observed taskRecord)
 					if err != nil {
 						return err
 					}
-					event := protocol.Event{Sequence: sequence, TaskID: task.ID, ThreadID: task.ThreadID, TurnID: task.TurnID, Type: "task/reconcile", Data: payload, CreatedAt: time.Now().UTC()}
+					event := protocol.Event{Sequence: sequence, TaskID: task.ID, ThreadID: task.ThreadID, TurnID: task.TurnID, Type: "task/reconcile", Data: payload, CreatedAt: h.now().UTC()}
 					if err = h.createFollowup(tx, b, task, event); err != nil {
 						return err
 					}

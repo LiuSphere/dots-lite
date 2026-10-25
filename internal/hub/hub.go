@@ -22,13 +22,14 @@ type AllowedSource struct {
 	ChatID   string `json:"chat_id"`
 }
 type Binding struct {
-	UID        int             `json:"uid"`
-	UserID     string          `json:"user_id"`
-	ProfileID  string          `json:"profile_id"`
-	ExecutorID string          `json:"executor_id"`
-	Token      string          `json:"token"`
-	FolderIDs  []string        `json:"folder_ids"`
-	Sources    []AllowedSource `json:"sources"`
+	DirectoryMode string          `json:"directory_mode,omitempty"`
+	UID           int             `json:"uid"`
+	UserID        string          `json:"user_id"`
+	ProfileID     string          `json:"profile_id"`
+	ExecutorID    string          `json:"executor_id"`
+	Token         string          `json:"token"`
+	FolderIDs     []string        `json:"folder_ids"`
+	Sources       []AllowedSource `json:"sources"`
 }
 
 func (b Binding) scope() protocol.Scope {
@@ -41,20 +42,23 @@ type Config struct {
 	FollowupBudget       int       `json:"followup_budget,omitempty"`
 }
 type invocation struct {
-	mu              sync.Mutex
-	UID             int
-	Tool            string
-	Arguments       string
-	Source          protocol.Source
-	Expires         time.Time
-	Result          json.RawMessage
-	TaskID          string
-	TaskVersion     int64
-	Confirmation    json.RawMessage
-	Decision        string
-	AttachmentFiles []protocol.InvocationAttachment
+	mu                 sync.Mutex
+	UID                int
+	Tool               string
+	Arguments          string
+	Source             protocol.Source
+	Expires            time.Time
+	Result             json.RawMessage
+	TaskID             string
+	TaskVersion        int64
+	Confirmation       json.RawMessage
+	Decision           string
+	AttachmentFiles    []protocol.InvocationAttachment
+	DirectorySelection *protocol.DirectorySelection
 }
 type Hub struct {
+	now         func() time.Time
+	maintenance map[string]protocol.Maintenance
 	cfg         Config
 	db          *store.DB
 	mu          sync.Mutex
@@ -73,7 +77,7 @@ func New(cfg Config, db *store.DB) (*Hub, error) {
 		cfg.InvocationTTLSeconds = 300
 	}
 	if cfg.FollowupBudget == 0 {
-		cfg.FollowupBudget = 8
+		cfg.FollowupBudget = 3
 	}
 	if cfg.InvocationTTLSeconds < 1 || cfg.FollowupBudget < 1 {
 		return nil, errors.New("invocation TTL and recovery budget must be positive")
@@ -84,6 +88,16 @@ func New(cfg Config, db *store.DB) (*Hub, error) {
 	cfg.Bindings = append([]Binding(nil), cfg.Bindings...)
 	for i := range cfg.Bindings {
 		b := &cfg.Bindings[i]
+		if b.DirectoryMode == "" {
+			if len(b.FolderIDs) > 0 {
+				b.DirectoryMode = "allowlist"
+			} else {
+				b.DirectoryMode = "task"
+			}
+		}
+		if b.DirectoryMode != "task" && b.DirectoryMode != "allowlist" {
+			return nil, errors.New("directory_mode must be task or allowlist")
+		}
 		if b.UID <= 0 || b.UserID == "" || b.ProfileID == "" || b.ExecutorID == "" || b.Token == "" || seenUID[b.UID] || seenExec[b.ExecutorID] || seenToken[b.Token] {
 			return nil, errors.New("invalid or duplicate binding")
 		}
@@ -91,7 +105,25 @@ func New(cfg Config, db *store.DB) (*Hub, error) {
 		seenExec[b.ExecutorID] = true
 		seenToken[b.Token] = true
 	}
-	h := &Hub{cfg: cfg, db: db, invocations: map[string]*invocation{}, sessions: map[string]*session{}}
+	h := &Hub{cfg: cfg, db: db, invocations: map[string]*invocation{}, sessions: map[string]*session{}, maintenance: map[string]protocol.Maintenance{}, now: time.Now}
+	if err := ensureProtocol(context.Background(), db, cfg); err != nil {
+		return nil, err
+	}
+	if err := db.Update(context.Background(), func(tx *store.Tx) error {
+		for _, b := range cfg.Bindings {
+			var state protocol.Maintenance
+			err := tx.Get("maintenance", owner(b.scope()), "executor", &state)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return err
+			}
+			if err == nil {
+				h.maintenance[b.ExecutorID] = state
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 	if err := h.recoverRecords(context.Background()); err != nil {
 		return nil, err
 	}
@@ -239,7 +271,10 @@ func (h *Hub) RegisterInvocation(ctx context.Context, uid int, in protocol.Invoc
 			delete(h.invocations, k)
 		}
 	}
-	h.invocations[ref] = &invocation{UID: uid, Tool: in.Tool, Arguments: args, Source: in.Source, Expires: now.Add(time.Duration(h.cfg.InvocationTTLSeconds) * time.Second), TaskID: boundTask, TaskVersion: boundVersion, AttachmentFiles: attachmentFiles}
+	if in.DirectorySelection != nil && (in.Source.Kind != "gateway" || in.DirectorySelection.MessageID == "" || in.DirectorySelection.MessageID != in.Source.MessageID) {
+		return "", failure("needs_directory_selection", "selection must belong to the current admitted user message")
+	}
+	h.invocations[ref] = &invocation{UID: uid, Tool: in.Tool, Arguments: args, Source: in.Source, Expires: now.Add(time.Duration(h.cfg.InvocationTTLSeconds) * time.Second), TaskID: boundTask, TaskVersion: boundVersion, AttachmentFiles: attachmentFiles, DirectorySelection: in.DirectorySelection}
 	return ref, nil
 }
 func knownTool(s string) bool {

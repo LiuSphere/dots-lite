@@ -370,7 +370,7 @@ func nativePeer(expectInputs bool) error {
 					return err
 				}
 			}
-			result = map[string]any{"thread": map[string]any{"id": "fixture-thread", "status": map[string]string{"type": "idle"}}}
+			result = map[string]any{"thread": map[string]any{"id": "fixture-thread", "cwd": folderRoot, "status": map[string]string{"type": "idle"}}, "cwd": folderRoot, "approvalPolicy": "on-request", "sandbox": map[string]any{"type": "workspaceWrite", "writableRoots": []string{folderRoot}}, "modelProvider": "fixture", "model": "fixture-model"}
 		case "turn/start":
 			if expectInputs {
 				if err := verifyNativeInputFiles(folderRoot, message.Params); err != nil {

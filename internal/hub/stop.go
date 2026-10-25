@@ -15,6 +15,7 @@ func (h *Hub) stop(ctx context.Context, b Binding, source protocol.Source, taskI
 		return nil, err
 	}
 	var op operationRecord
+	epoch, _ := h.maintenanceState(b)
 	err = h.db.Update(ctx, func(tx *store.Tx) error {
 		if err := checkAPIAttempt(tx, b, source); err != nil {
 			return err
@@ -28,6 +29,7 @@ func (h *Hub) stop(ctx context.Context, b Binding, source protocol.Source, taskI
 		task.Execution = "pause_requested"
 		task.UpdatedAt = time.Now().UTC()
 		op = operationRecord{Operation: protocol.Operation{ID: id, TaskID: task.ID, Scope: b.scope(), TaskVersion: task.Version, FolderID: task.FolderID, WorkingDirectory: task.WorkingDirectory, Action: "task.stop", ThreadID: task.ThreadID, ExpectedTurnID: task.TurnID}, Source: source, Stage: "prepared", CreatedAt: task.UpdatedAt, UpdatedAt: task.UpdatedAt}
+		op.MaintenanceEpoch = epoch
 		if err = tx.Put("task", owner(b.scope()), task.ID, task); err != nil {
 			return err
 		}

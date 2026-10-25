@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -27,6 +28,9 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err error) {
+	if len(args) > 0 && args[0] == "maintenance" {
+		return runMaintenance(ctx, args[1:], stdout, stderr)
+	}
 	flags := flag.NewFlagSet("executor", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	probe := flags.Bool("probe", false, "initialize a separate local app-server and check account configuration without running a model")
@@ -89,6 +93,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err erro
 }
 
 type serviceConfig struct {
+	DirectoryMode string `json:"directory_mode,omitempty"`
+	Maintenance   struct {
+		TaskName       string `json:"task_name"`
+		TaskExecutable string `json:"task_executable"`
+		TaskArguments  string `json:"task_arguments"`
+	} `json:"maintenance,omitempty"`
 	Scope     protocol.Scope    `json:"scope"`
 	Folders   []protocol.Folder `json:"folders"`
 	StatePath string            `json:"state_path"`
@@ -97,14 +107,13 @@ type serviceConfig struct {
 	Codex     string            `json:"codex"`
 }
 
-func runService(ctx context.Context, configPath string, stderr io.Writer) (err error) {
+func readServiceConfig(configPath string) (cfg serviceConfig, err error) {
 	file, err := os.Open(configPath)
 	if err != nil {
-		return fmt.Errorf("open executor configuration: %w", err)
+		return cfg, fmt.Errorf("open executor configuration: %w", err)
 	}
 	decoder := json.NewDecoder(file)
 	decoder.DisallowUnknownFields()
-	var cfg serviceConfig
 	decodeErr := decoder.Decode(&cfg)
 	if decodeErr == nil {
 		var extra any
@@ -115,7 +124,19 @@ func runService(ctx context.Context, configPath string, stderr io.Writer) (err e
 		}
 	}
 	if err := errors.Join(decodeErr, file.Close()); err != nil {
-		return fmt.Errorf("read executor configuration: %w", err)
+		return cfg, fmt.Errorf("read executor configuration: %w", err)
+	}
+	return cfg, nil
+}
+
+func runService(ctx context.Context, configPath string, stderr io.Writer) (err error) {
+	configPath, err = filepath.Abs(configPath)
+	if err != nil {
+		return err
+	}
+	cfg, err := readServiceConfig(configPath)
+	if err != nil {
+		return err
 	}
 	if cfg.HubURL == "" || cfg.TokenFile == "" {
 		return errors.New("hub_url and token_file are required")
@@ -136,7 +157,7 @@ func runService(ctx context.Context, configPath string, stderr io.Writer) (err e
 		cfg.Codex = "codex"
 	}
 	service, err := executor.NewService(executor.ServiceConfig{
-		Scope: cfg.Scope, Folders: cfg.Folders, StatePath: cfg.StatePath,
+		Scope: cfg.Scope, Folders: cfg.Folders, StatePath: cfg.StatePath, DirectoryMode: cfg.DirectoryMode,
 		Native: executor.Options{
 			Command: []string{cfg.Codex, "app-server", "--listen", "stdio://"},
 			Stderr:  stderr,
@@ -146,5 +167,22 @@ func runService(ctx context.Context, configPath string, stderr io.Writer) (err e
 		return err
 	}
 	defer func() { err = errors.Join(err, service.Close()) }()
-	return service.Run(ctx, cfg.HubURL, token)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	closeControl, err := serveMaintenance(ctx, configPath, cfg, service, cancel)
+	if err != nil {
+		return err
+	}
+	defer closeControl()
+	schemaCtx, cancelSchema := context.WithTimeout(ctx, 15*time.Second)
+	schemaErr := service.LoadThreadSources(schemaCtx, cfg.Codex)
+	cancelSchema()
+	if schemaErr != nil && ctx.Err() == nil {
+		fmt.Fprintln(stderr, "native inventory schema:", schemaErr)
+	}
+	err = service.Run(ctx, cfg.HubURL, token)
+	if errors.Is(err, context.Canceled) && service.MaintenanceStatus().Phase == "stopping" {
+		return nil
+	}
+	return err
 }

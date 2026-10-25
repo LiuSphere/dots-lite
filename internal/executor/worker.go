@@ -62,6 +62,19 @@ const maxNativeRestarts = 3
 // A transport reconnect never enters this loop or replenishes its persistent
 // budget. Only a completely retired owned native process may be replaced.
 func (s *Service) superviseNative(ctx context.Context) {
+	defer func() {
+		if ctx.Err() != nil {
+			return
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.maintenance.Phase != "running" || s.nativeErr == nil {
+			return
+		}
+		if err := s.recordNativeUnavailable(context.WithoutCancel(ctx), s.nativeErr, "task/native_recovery_failed"); err != nil {
+			s.failNativeEventsLocked(err)
+		}
+	}()
 	if err := s.StartNative(ctx); err != nil {
 		return
 	}
@@ -121,6 +134,9 @@ func (s *Service) superviseNative(ctx context.Context) {
 func (s *Service) reserveNativeRestart(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.maintenance.Phase != "running" {
+		return errors.New("native restarts are disabled by maintenance")
+	}
 	if s.eventFault != nil {
 		return s.eventFault
 	}
@@ -252,6 +268,15 @@ func (s *Service) connectHub(ctx context.Context, url, token string) error {
 		}
 		switch frame.Type {
 		case "ack":
+			s.mu.Lock()
+			s.hubAcknowledged = true
+			if s.maintenance.Phase == "resuming" && s.client != nil && s.client.Err() == nil {
+				err = s.persistMaintenanceLocked(connectionCtx, "running", nil)
+			}
+			s.mu.Unlock()
+			if err != nil {
+				return err
+			}
 			if err := s.AckEvents(connectionCtx, frame.AckSequence); err != nil {
 				return err
 			}

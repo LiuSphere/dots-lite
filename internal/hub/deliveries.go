@@ -157,7 +157,7 @@ func queueAttention(tx *store.Tx, b Binding, task taskRecord, key, text string) 
 }
 
 func queueRecoveryBudgetNotice(tx *store.Tx, b Binding, task taskRecord, latest followup) error {
-	text := fmt.Sprintf("任务「%s」(%s) 的自动跟进已达到累计预算，已停止自动跟进。\n当前业务快照：执行=%s，核验=%s，交付=%s。\n已尝试原生跟进 %d 次、受理请求 %d 次；最近原生状态=%s。", task.Name, task.ID, task.Execution, task.Verification, task.Delivery, task.RecoveryUsed, task.RecoveryAttempts, latest.NativeStatus)
+	text := fmt.Sprintf("任务「%s」(%s) 的本次故障或未知提交已达到处理限额，已停止重复诊断；程序仍可只读观察。\n当前业务快照：执行=%s，核验=%s，交付=%s。\n累计交给 worker %d 次、提交前轮询 %d 次；这些不代表原生已受理或模型调用次数。最近已知原生状态=%s。停止原因：%s。", task.Name, task.ID, task.Execution, task.Verification, task.Delivery, task.RecoveryUsed, task.RecoveryAttempts, latest.NativeStatus, latest.Error)
 	bounded := func(value string) string {
 		chars := []rune(value)
 		if len(chars) > 500 {

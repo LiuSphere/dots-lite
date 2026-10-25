@@ -95,7 +95,7 @@ func followupFixture(t *testing.T, budget int) (context.Context, *hub.Hub, *webs
 	return ctx, h, conn, taskID
 }
 
-func TestHandledUnavailableStateDoesNotSuppressLaterQuiescenceInSameTurn(t *testing.T) {
+func TestUnavailableStateDoesNotStartModelAndLaterQuiescenceCanBeVerified(t *testing.T) {
 	ctx, h, conn, taskID := connectedHubFixture(t, 4)
 	var ops []struct {
 		ID string `json:"operation_id"`
@@ -133,14 +133,8 @@ func TestHandledUnavailableStateDoesNotSuppressLaterQuiescenceInSameTurn(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := readFollowup(t, raw)
-	evidence := json.RawMessage(`{"task_id":"` + taskID + `","kind":"followup","status":"handled","evidence":{"actions":["checked native availability"],"verification":{"observed":"native unavailable"}}}`)
-	ref, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "dots_lite_record", Arguments: evidence, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: first.SessionID, SessionID: "physical", NativeTaskID: "first-run", ToolCallID: "handled-first"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "dots_lite_record", Arguments: evidence, ContextRef: ref}); err != nil {
-		t.Fatal(err)
+	if string(raw) != "null" {
+		t.Fatalf("transport failure started a model diagnosis: %s", raw)
 	}
 	event := protocol.Event{Sequence: 1, TaskID: taskID, InstanceID: "retry-instance", ThreadID: "thread-a", TurnID: "turn-a", Type: "turn/completed", Data: json.RawMessage(`{"turn":{"id":"turn-a","status":"completed"}}`), CreatedAt: time.Now().UTC()}
 	if err = wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "event", Event: &event}); err != nil {
@@ -184,9 +178,6 @@ func TestHandledUnavailableStateDoesNotSuppressLaterQuiescenceInSameTurn(t *test
 	next, err := h.NextFollowup(ctx, 1001)
 	if err != nil || string(next) == "null" {
 		t.Fatalf("handled availability check suppressed actual final verification: %s %v", next, err)
-	}
-	if readFollowup(t, next).ID == first.ID {
-		t.Fatal("final verification reused handled diagnostic")
 	}
 }
 
@@ -265,13 +256,14 @@ func TestTerminalFollowupWithoutBusinessConfirmationCreatesBoundedDiagnosticAtte
 func TestConfirmedFollowupsDoNotCreateDiagnosticAttempts(t *testing.T) {
 	for _, status := range []string{"handled", "waiting_user"} {
 		t.Run(status, func(t *testing.T) {
-			ctx, h, _, taskID := followupFixture(t, 2)
+			ctx, h, conn, taskID := followupFixture(t, 2)
 			raw, err := h.NextFollowup(ctx, 1001)
 			if err != nil {
 				t.Fatal(err)
 			}
 			f := readFollowup(t, raw)
-			evidence := json.RawMessage(`{"task_id":"` + taskID + `","kind":"followup","status":"` + status + `","evidence":{"actions":["inspected native requests"],"verification":{"observed":"request needs user"}}}`)
+			observed := observeNativeFixture(t, ctx, h, conn, taskID)
+			evidence := json.RawMessage(`{"task_id":"` + taskID + `","kind":"followup","status":"` + status + `","evidence":{"actions":[{"observation_id":"` + observed + `"}],"verification":{"observation_id":"` + observed + `","observed":"request needs user"}}}`)
 			ref, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "dots_lite_record", Arguments: evidence, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: f.SessionID, SessionID: "physical", NativeTaskID: "native-run", ToolCallID: "record-status"}})
 			if err != nil {
 				t.Fatal(err)
@@ -291,4 +283,28 @@ func TestConfirmedFollowupsDoNotCreateDiagnosticAttempts(t *testing.T) {
 			}
 		})
 	}
+}
+
+func observeNativeFixture(t *testing.T, ctx context.Context, h *hub.Hub, conn *websocket.Conn, taskID string) string {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() {
+		var frame protocol.Frame
+		if err := wsjson.Read(ctx, conn, &frame); err != nil {
+			done <- err
+			return
+		}
+		done <- wsjson.Write(ctx, conn, protocol.Frame{Version: protocol.Version, Type: "result", ID: frame.ID, Result: &protocol.Result{OperationID: frame.Operation.ID, TaskID: taskID, Stage: "accepted", Data: json.RawMessage(`{"native":{"thread":{"status":{"type":"idle"}}},"requests":[]}`)}})
+	}()
+	raw := call(t, h, 1001, "dots_lite_query", `{"query":"session","task_id":"`+taskID+`"}`)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		ID string `json:"_observation_id"`
+	}
+	if json.Unmarshal(raw, &result) != nil || result.ID == "" {
+		t.Fatalf("native query did not expose its recorded observation: %s", raw)
+	}
+	return result.ID
 }

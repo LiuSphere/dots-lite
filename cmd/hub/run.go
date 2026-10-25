@@ -22,6 +22,8 @@ func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	state := flags.String("state", "state/hub.db", "hub SQLite path")
 	socket := flags.String("socket", "state/hub.sock", "profile Unix socket path")
 	listen := flags.String("listen", "127.0.0.1:8025", "executor WebSocket listen address")
+	migrate := flags.Bool("migrate-v3", false, "migrate a stopped protocol 3 database after backup")
+	offline := flags.Bool("offline-confirmed", false, "operator confirms old hub, adapter and executor writers have stopped")
 	if err = flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -59,6 +61,20 @@ func run(ctx context.Context, args []string, stderr io.Writer) (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, db.Close()) }()
+	if *migrate {
+		if !*offline {
+			return errors.New("stop all old service writers and supply -offline-confirmed before migration")
+		}
+		backup := *state + ".v3-backup-" + time.Now().UTC().Format("20060102T150405.000000000")
+		if err := db.Backup(ctx, backup); err != nil {
+			return err
+		}
+		if err := hub.MigrateV3(ctx, db, cfg); err != nil {
+			return err
+		}
+		_, err = io.WriteString(stderr, "Protocol 4 state prepared; tasks remain paused. Backup: "+backup+"\nDo not restore this backup after new business or control writes.\n")
+		return err
+	}
 	h, err := hub.New(cfg, db)
 	if err != nil {
 		return err

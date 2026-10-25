@@ -1,110 +1,96 @@
 # dots-lite
 
-**Run and follow up on Codex tasks on your own computer, through Hermes chat.**
+**Run and follow up on Codex work on your own computer through Hermes chat.**
 
-[简体中文](README.zh-CN.md) · [User guide](docs/使用指南.md) · [Deployment guide](docs/运行指南.md) · [Releases](https://github.com/LiuSphere/dots-lite/releases)
+[简体中文](README.zh-CN.md) · [Deployment skill](skills/dots-lite-deploy/SKILL.md) · [Hermes adapter](adapters/hermes/README.md) · [Releases](https://github.com/LiuSphere/dots-lite/releases)
 
-Your code and Codex run on your computer. Hermes receives chat requests, a Linux Hub routes tasks to the paired computer, and results return to the correct profile. Continue a session, add instructions, stop work, handle approvals, and let Hermes inspect actual files before delivering the result.
-
-```text
-Chat / WeChat
-    │
-    ▼
-Hermes profile ── MCP + trusted-source plugin ── Linux Hub
-                                                  ▲
-                                  Private WebSocket, outbound from executor
-                                                  │
-                                           Windows executor
-                                                  │ stdio
-                                           Codex app-server
-                                                  │
-                                           Authorized folders
-```
-
-## Features
-
-- **Use your own environment.** Keep your Codex login, dependencies and working directories on your computer.
-- **Authorize folders.** Allow one or more roots, then choose an existing subdirectory for each task without registering every project.
-- **Track work across sessions.** Persist task IDs, sessions, operations and events so reconnects and chat changes do not lose task identity.
-- **Route questions and approvals.** Send answers to the correct task, turn and pending request.
-- **Transfer and verify files.** Accept attachments, read or download task files, acquire artifacts, and record verification and delivery separately.
-- **Isolate users.** Check the Linux UID, profile, executor and trusted chat source. Run business services under unprivileged accounts.
-
-For example, after authorizing `C:\work`, ask in chat:
-
-> Fix the login failure in the `demo` folder. Check the cause first, then return the test results and changed files.
-
-You can then query the task, add instructions or stop the current execution. The working directory must already exist inside an authorized root. Model instructions cannot expand folder access.
-
-## Get started
-
-The current deployment targets **Linux Hub + Windows executor + Hermes**. The Hub authenticates local callers through Unix socket peer credentials. Executors connect outbound over a controlled network. The Hub has no built-in TLS; use a private network or an authenticated encrypted tunnel.
-
-| Location | Requirements |
-| --- | --- |
-| Execution computer | Windows, a working authenticated Codex app-server, and task dependencies |
-| Server | Linux, systemd, a working Hermes profile; a separate OS account for each connected profile |
-| Network | Executor can reach the Hub over a controlled network; no server-to-computer SSH access is needed |
-| Deployment tools | An agent with local and server access; PowerShell 7, Python 3.10+ and OpenSSH on Windows for temporary-access preparation |
-
-1. Select a version from [Releases](https://github.com/LiuSphere/dots-lite/releases). Hub and executor must use the same protocol; v0.3.0 uses protocol 3.
-2. Ask your agent to read the repository's [dots-lite-deploy skill](skills/dots-lite-deploy/SKILL.md). Provide the server, target profile, installation directories and allowed folders.
-3. The agent prepares configuration, backups and services, checks versions and permissions, and verifies pairing. Windows defaults to hidden startup at user login. Service restarts reuse credentials and reconnect automatically.
-4. After acceptance checks, the agent revokes temporary deployment access and deletes the dedicated local private key. Routine tasks do not need a server administrator key.
-
-A prompt you can give your agent:
+Your code, Codex login and dependencies stay on your computer. Hermes receives chat requests. A Linux Hub routes them to the paired Windows executor and returns task state, approvals and files to the correct profile.
 
 ```text
-Deploy dots-lite using skills/dots-lite-deploy/SKILL.md.
-Inspect the existing setup, then ask for any missing server, profile,
-installation-directory and authorized-folder choices.
-If temporary passwordless sudo is needed, explain the risks and obtain
-my acknowledgement before preparing access. Prepare everything for me;
-give me only the command that requires my password.
-After acceptance checks, revoke temporary access, delete the dedicated
-local deployment private key, and report what was and was not verified.
+Hermes chat / WeChat
+        │ MCP + trusted-source plugin
+        ▼
+Linux Hub ── private WebSocket ◀── Windows executor
+                                      │ local stdio
+                                      ▼
+                                Codex app-server
+                                      │
+                              Selected task directory
 ```
 
-**A temporary deployment key grants root-equivalent server access.** Anyone holding it can control the server during deployment. The skill includes [risk disclosure, one-command provisioning and revocation](skills/dots-lite-deploy/references/access.md). Generate the private key locally and install only its public key on the server. With an existing noninteractive ordinary SSH login, the user normally enters only the sudo password. Otherwise SSH may require an additional password or multi-factor authentication.
+## Current source
 
-## Status and limits
+The current source uses **protocol 4**, with Hermes adapter **0.4.0.dev0**. Released v0.3.0 uses protocol 3. Upgrade the Hub, executor and adapter together. Existing state requires an explicit offline migration; replacing one binary alone is insufficient.
 
-This is an early-stage project. The Hub, executor, MCP adapter, source binding, background follow-up and file transfers are implemented. Acceptance records include real Codex execution and cross-machine file retrieval. The current naming update has also passed deployment checks. See the [acceptance record](docs/验收记录.md) for evidence and limits.
+- **Continue native sessions.** List accessible persistent sessions in the paired Codex environment, including other sources and archived sessions. Follow pagination and preserve the original thread ID, history and directory. Listing does not resume a session or start a model turn.
+- **Keep failures visible.** Attachment checks the effective provider, directory, approvals and sandbox. It first shows those settings and keeps the task paused; a later explicit user request continues it. Active-writer conflicts and unverified permissions return a reason and queue a notification. The service does not force control of another active instance.
+- **Choose a task directory.** New installations use `directory_mode: task`. The user supplies an existing absolute directory or selects the original native thread in the current trusted chat message. File tools stay inside that task's actual directory. An optional `allowlist` adds root restrictions; upgrades retain existing roots.
+- **Follow meaningful events.** Ordinary output, waiting and native retries do not create another model diagnosis. Normal progress has no task-wide eight-follow-up or one-hour limit. A single unresolved fault still has bounded diagnostics. Native resource limits, user pauses and unknown operations remain effective.
+- **Pause for maintenance.** Two Windows scripts pause and resume the local service. Pause first suspends managed tasks and Goals, then confirms owned processes have exited. Resume starts the service while leaving individual tasks paused.
+- **Verify and deliver files.** Keep execution, verification, file acquisition and chat delivery separate. A completed turn or a model's success claim is not proof that the user's goal passed or a file arrived.
 
-Two real users on different computers, human WeChat approval, actual WeChat attachment exchange, sustained fault recovery and startup after a system reboot still need field validation. Reading or restoring Codex history does not establish control over an already active desktop chat.
+For example, in task mode:
 
-The MCP configuration key is `dots_lite`; all seven tools use the `dots_lite_*` prefix. Configuration uses `folders`, `folder_ids` and `folder_id`. The current version rejects old names. Existing deployments require coordinated shutdown, backup and offline state conversion before upgrading; see the [operations guide](docs/运行指南.md).
+> Fix the login failure in `C:\work\demo`. Check the cause first, then return the test results and changed files.
+
+Directory selection does not grant administrator rights or bypass native approval. The service checks the Linux UID, profile, executor and trusted message source. It does not modify Hermes core or implement a second native run engine.
+
+## Deployment
+
+The supported deployment is **Linux Hub + Windows executor + Hermes**. Each connected profile uses its own unprivileged OS account. Executors connect outbound; server-to-Windows SSH is unnecessary. The Hub has no built-in TLS, so use a controlled private network or an authenticated encrypted tunnel.
+
+Ask your agent to use [dots-lite-deploy](skills/dots-lite-deploy/SKILL.md):
+
+```text
+Deploy or update dots-lite using skills/dots-lite-deploy/SKILL.md.
+Inspect the existing setup and preserve its credentials, IDs, task history,
+pauses and directory restrictions. Ask only for missing decisions.
+Prepare configuration and backups before changing services.
+If new temporary sudo access is needed, explain its authority and cleanup
+before creating it. Report observed checks separately from untested behavior.
+```
+
+Deployment uses a server administrator identity only for installation. Do not give maintenance keys or sudo rights to business profiles. Temporary access has a separate [provisioning and revocation procedure](skills/dots-lite-deploy/references/access.md); an existing shared administrator identity must not be deleted as temporary cleanup.
+
+Full configuration and migration instructions are in [deployment operations](skills/dots-lite-deploy/references/deployment.md). The MCP configuration key is `dots_lite`; its seven tools use `dots_lite_*`. Runtime environment names use `DOTS_LITE_*`.
+
+Protocol 3 migration requires confirmed shutdown of old writers and consistent backups. Use the documented explicit migration commands as the actual service users. Migration preserves task/thread/operation IDs, receipts and recovery history, retains `allowlist`, and leaves tasks paused. Once protocol 4 accepts new business or control writes, do not restore an old snapshot over the new state.
+
+Windows maintenance scripts belong beside `bin/executor.exe` and read `config/executor.json`. Their `maintenance` configuration must match the real scheduled task, executable and exact arguments. No private configuration, keys, database or binaries are committed here.
+
+## Validation and limits
+
+Local checks cover Windows Go tests and vet, Linux Hub/executor/integration tests, and the Hermes adapter suite. Real Codex checks cover read-only inventory and a dedicated thread continued through a localhost fixed-response provider. A controlled clock covers 72 hours and 12 normal stages; this is not three days of live operation or a measurement of model cost.
+
+Real model supervision, human approvals, actual WeChat attachment exchange, multiple execution computers and long-running fault recovery require their own field evidence. Old protocol executors cannot connect to a protocol 4 Hub. Reading a native session does not establish safe control of an already active desktop chat. Native run counts do not equal underlying LLM request counts; unavailable usage stays unknown.
 
 ## Development
 
-The Go version is declared in [go.mod](go.mod), currently Go 1.27.3. The Hermes adapter uses Python 3.14 and a uv lockfile. Running a released Windows executor does not require Go or the adapter's Python environment.
+[go.mod](go.mod) pins the Go toolchain. The adapter uses Python 3.14 and its uv lockfile. Windows users running a built executor do not need Go or the adapter's Python environment.
 
 ```sh
-# From the repository root. Normal tests do not call a real model.
-go mod download
-go test ./...
+# Repository root. Normal tests do not call a real model.
+go test ./... -count=1
 go vet ./...
+go build -o dist/executor.exe ./cmd/executor
 uv sync --project adapters/hermes --locked
 uv run --project adapters/hermes --locked python -m unittest discover -s adapters/hermes/tests -v
 ```
 
-Run the complete UID/socket suite on Linux. Windows skips those platform-specific cases. Real Codex integration tests require explicit `DOTS_LITE_REAL_CODEX=1`; they call a model and write to a temporary workspace. Build and service instructions are in the [deployment guide](docs/运行指南.md). Binaries are distributed through Releases rather than committed to the repository.
+Build the Hub on Linux, or cross-compile with `GOOS=linux GOARCH=amd64`. Run Linux UID/socket tests on Linux; platform skips on Windows do not validate them. `DOTS_LITE_REAL_CODEX=1` explicitly enables tests that can call a real model and write a temporary workspace. Never set it globally as a health-check option.
 
 ```text
 cmd/hub/           Linux Hub entry point
-cmd/executor/      Executor entry point
-internal/          Protocol, authorization, sessions, files and SQLite state
-adapters/hermes/   MCP, trusted-source plugin and background worker
-skills/            Reusable deployment workflow and helpers
-docs/              Usage, operations, design and acceptance records
+cmd/executor/      Windows executor and maintenance commands
+internal/          Protocol, authorization, sessions, files and durable state
+adapters/hermes/   MCP, trusted-source plugin and background adapter
+skills/            Public deployment workflow and assets
 ```
 
-## Contributing
+`docs/` contains local requirements, design, progress and acceptance records. It is ignored by Git. Public deployment instructions do not depend on those files.
 
-Use Issues for bugs and proposals, and Pull Requests for changes. Include the version, OS, reproduction steps and redacted logs. Distinguish model execution, file acquisition and message delivery. Keep private keys, tokens, real chat identifiers and personal deployment records out of reports and commits.
+## Contributing and license
 
-Run relevant tests for code changes. Validate Linux permission and socket behavior on Linux. The [requirements](docs/需求.md) and [design](docs/详细实现方案.md) explain the architecture; detailed guides are currently in Chinese.
+Use Issues for bugs and proposals and Pull Requests for changes. Include the version, OS, reproduction steps and redacted logs. Keep private keys, tokens, chat identifiers and personal deployment records out of commits. Run the relevant tests and distinguish model execution, file acquisition and delivery results.
 
-## License
-
-Licensed under [BSD 3-Clause](LICENSE). Commercial use, modification and redistribution are permitted. Retain the copyright notice, license conditions and disclaimer when redistributing. Do not use the copyright holder's or contributors' names to endorse derived products without permission. Third-party components retain their own licenses.
+Licensed under [BSD 3-Clause](LICENSE). Commercial use, modification and redistribution are permitted subject to its terms. Third-party components retain their own licenses.

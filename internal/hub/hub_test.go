@@ -842,8 +842,9 @@ func TestSubmitDispatchesOnceAndKeepsNativeExecutionSeparateFromVerification(t *
 	if _, err = h.Call(ctx, 1001, protocol.ToolRequest{Tool: "dots_lite_record", Arguments: emptyEvidence, ContextRef: emptyRef}); err == nil {
 		t.Fatal("empty actions and verification marked followup handled")
 	}
+	observed := observeNativeFixture(t, ctx, h, conn, ids.TaskID)
 	for _, status := range []string{"handled", "waiting_user"} {
-		evidence := json.RawMessage(`{"task_id":"` + ids.TaskID + `","kind":"followup","status":"` + status + `","evidence":{"actions":["inspected native history"],"verification":{"observed":"report exists"}}}`)
+		evidence := json.RawMessage(`{"task_id":"` + ids.TaskID + `","kind":"followup","status":"` + status + `","evidence":{"actions":[{"observation_id":"` + observed + `"}],"verification":{"observation_id":"` + observed + `","observed":"report exists"}}}`)
 		ref, err := h.RegisterInvocation(ctx, 1001, protocol.Invocation{Tool: "dots_lite_record", Arguments: evidence, Source: protocol.Source{Kind: "api", Platform: "api_server", ChatID: follow.SessionID, SessionID: "physical-session", NativeTaskID: "native-run", ToolCallID: "record-" + status}})
 		if err != nil {
 			t.Fatal(err)

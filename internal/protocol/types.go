@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// Version 3 uses folder naming throughout the wire protocol.
-const Version = 3
+// Version 4 binds writes to maintenance epochs and adds native session access.
+const Version = 4
 
 // Scope is supplied by authenticated configuration, never by a model argument.
 type Scope struct {
@@ -40,10 +40,25 @@ type Source struct {
 }
 
 type Invocation struct {
-	Tool            string                 `json:"tool"`
-	Arguments       json.RawMessage        `json:"arguments"`
-	Source          Source                 `json:"source"`
-	AttachmentFiles []InvocationAttachment `json:"attachment_files,omitempty"`
+	Tool               string                 `json:"tool"`
+	Arguments          json.RawMessage        `json:"arguments"`
+	Source             Source                 `json:"source"`
+	AttachmentFiles    []InvocationAttachment `json:"attachment_files,omitempty"`
+	DirectorySelection *DirectorySelection    `json:"directory_selection,omitempty"`
+}
+
+// Supplied privately by the source plugin, never as model tool arguments.
+type DirectorySelection struct {
+	Path      string `json:"path,omitempty"`
+	ThreadID  string `json:"thread_id,omitempty"`
+	MessageID string `json:"message_id"`
+}
+
+type Maintenance struct {
+	RemoteSyncPending bool   `json:"remote_sync_pending,omitempty"`
+	Epoch             int64  `json:"epoch"`
+	Phase             string `json:"phase"`
+	Error             string `json:"error,omitempty"`
 }
 
 type ToolRequest struct {
@@ -77,6 +92,9 @@ func (e *Error) Error() string { return e.Code + ": " + e.Message }
 
 // Operation is persisted before dispatch. Reusing ID cannot change its payload.
 type Operation struct {
+	Foreground       bool            `json:"foreground"`
+	MaintenanceEpoch int64           `json:"maintenance_epoch"`
+	Archived         string          `json:"archived,omitempty"`
 	ID               string          `json:"operation_id"`
 	TaskID           string          `json:"task_id"`
 	Scope            Scope           `json:"scope"`
@@ -113,6 +131,10 @@ type Result struct {
 }
 
 type Task struct {
+	DirectoryMode    string          `json:"directory_mode,omitempty"`
+	NativePolicy     json.RawMessage `json:"native_policy,omitempty"`
+	ModelProvider    string          `json:"model_provider,omitempty"`
+	Model            string          `json:"model,omitempty"`
 	ID               string          `json:"task_id"`
 	Scope            Scope           `json:"scope"`
 	Name             string          `json:"name"`
@@ -146,11 +168,12 @@ type Event struct {
 }
 
 type Snapshot struct {
-	InstanceID  string   `json:"instance_id"`
-	Initialized bool     `json:"initialized"`
-	Folders     []Folder `json:"folders"`
-	Tasks       []Task   `json:"tasks"`
-	Error       string   `json:"error,omitempty"`
+	Maintenance Maintenance `json:"maintenance"`
+	InstanceID  string      `json:"instance_id"`
+	Initialized bool        `json:"initialized"`
+	Folders     []Folder    `json:"folders"`
+	Tasks       []Task      `json:"tasks"`
+	Error       string      `json:"error,omitempty"`
 }
 
 // Frame is the application WebSocket envelope; only its matching body is set.

@@ -53,6 +53,17 @@ func Open(path string) (*DB, error) {
 	return &DB{db: db}, nil
 }
 func (d *DB) Close() error { return d.db.Close() }
+
+// Backup creates a new consistent SQLite copy and fails if the target exists.
+func (d *DB) Backup(ctx context.Context, path string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.db.ExecContext(ctx, `VACUUM INTO ?`, path)
+	if err == nil {
+		err = os.Chmod(path, 0600)
+	}
+	return err
+}
 func (d *DB) Update(ctx context.Context, fn func(*Tx) error) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -100,4 +111,21 @@ func (t *Tx) List(kind, owner string) ([]json.RawMessage, error) {
 		out = append(out, json.RawMessage(b))
 	}
 	return out, rows.Err()
+}
+
+func (t *Tx) Owners(kind string) ([]string, error) {
+	rows, err := t.tx.QueryContext(t.ctx, `SELECT DISTINCT owner FROM documents WHERE kind=? ORDER BY owner`, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	owners := []string{}
+	for rows.Next() {
+		var owner string
+		if err := rows.Scan(&owner); err != nil {
+			return nil, err
+		}
+		owners = append(owners, owner)
+	}
+	return owners, rows.Err()
 }

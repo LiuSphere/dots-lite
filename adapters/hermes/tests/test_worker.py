@@ -3,11 +3,36 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from datetime import datetime, timezone
 
 from dots_lite_hermes.worker import FollowupWorker
 
 
 class WorkerTests(unittest.TestCase):
+    def test_expired_unknown_submission_is_blocked_without_replaying_native_post(self):
+        class Hub:
+            def __init__(self):
+                self.blocked = None
+
+            def request(self, method, path, payload=None):
+                if path == "/v1/artifacts/next":
+                    return None
+                if method == "POST":
+                    self.blocked = (path, payload)
+                    return {"ok": True}
+                return {"id": "expired", "offered_at": "2026-01-01T00:00:00Z", "session_id": "s", "request": {"session_id": "s"}, "idempotency_key": "same-key"}
+
+        class Native:
+            def request(self, method, path, payload=None, idempotency_key=None):
+                if method != "GET" or path != "/v1/capabilities":
+                    raise AssertionError("expired idempotency must never submit a second native run")
+                return {"features": {"runs_idempotency": {"supported": True, "durable": True, "retention_seconds": 60}}}
+
+        hub = Hub()
+        self.assertTrue(FollowupWorker(hub, Native()).step())
+        self.assertEqual(hub.blocked[0], "/v1/followups/expired/submission")
+        self.assertIn("expired", hub.blocked[1]["error"])
+
     def test_automatic_artifact_is_acquired_before_any_model_followup(self):
         class Hub:
             def __init__(self):
@@ -88,6 +113,7 @@ class WorkerTests(unittest.TestCase):
 
     def test_known_native_run_is_polled_without_starting_a_second_run(self):
         followup = {
+		    "offered_at": datetime.now(timezone.utc).isoformat(),
             "id": "F1", "session_id": "api-session-a", "idempotency_key": "followup-a",
             "request": {"input": "Check task Q1", "session_id": "api-session-a"},
         }
@@ -103,7 +129,7 @@ class WorkerTests(unittest.TestCase):
                     return dict(followup)
                 if path.endswith("/run"):
                     followup["run_id"] = payload["run_id"]
-                else:
+                elif path.endswith("/report"):
                     self.reports.append(payload)
                 return {"ok": True}
 
@@ -113,7 +139,7 @@ class WorkerTests(unittest.TestCase):
 
             def request(self, method, path, payload=None, idempotency_key=None):
                 if path == "/v1/capabilities":
-                    return {"features": {"runs_idempotency": {"supported": True, "durable": True}}}
+                    return {"features": {"runs_idempotency": {"supported": True, "durable": True, "retention_seconds": 86400}}}
                 if method == "POST":
                     self.submissions.append((payload, idempotency_key))
                     return {"run_id": "run_a", "status": "queued"}
@@ -130,6 +156,7 @@ class WorkerTests(unittest.TestCase):
 
     def test_lost_native_post_result_reuses_same_key_and_body_without_another_run(self):
         followup = {
+		    "offered_at": datetime.now(timezone.utc).isoformat(),
             "id": "F1", "session_id": "api-session-a", "idempotency_key": "followup-a",
             "request": {"input": "Check task Q1", "session_id": "api-session-a"},
         }
@@ -151,7 +178,7 @@ class WorkerTests(unittest.TestCase):
 
             def request(self, method, path, payload=None, idempotency_key=None):
                 if path == "/v1/capabilities":
-                    return {"features": {"runs_idempotency": {"supported": True, "durable": True}}}
+                    return {"features": {"runs_idempotency": {"supported": True, "durable": True, "retention_seconds": 86400}}}
                 if method == "POST":
                     self.attempts.append((dict(payload), idempotency_key))
                     if idempotency_key not in self.runs:

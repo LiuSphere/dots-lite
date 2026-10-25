@@ -1302,6 +1302,7 @@ func TestServiceNativeRestartBudgetSurvivesTransportReconnectsAndServiceRecreati
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }))
 	defer hub.Close()
 	config := serviceConfig(t)
+	config.Native.Command = append(config.Native.Command, "unique-thread-ids")
 	for i := 1; i < 5; i++ {
 		config.Folders = append(config.Folders, protocol.Folder{ID: fmt.Sprintf("folder-%d", i), Root: t.TempDir()})
 	}
@@ -1630,6 +1631,9 @@ func TestServicePeer(t *testing.T) {
 		interrupted = true
 	}
 	folderRoot := ""
+	if len(os.Args) == 4 && os.Args[2] == "expect-resume-cwd" {
+		folderRoot = os.Args[3]
+	}
 	var control net.Conn
 	var pendingTurnID json.RawMessage
 	var pendingGoalID json.RawMessage
@@ -1740,7 +1744,11 @@ func TestServicePeer(t *testing.T) {
 					os.Exit(5)
 				}
 			}
-			result = map[string]any{"thread": map[string]string{"id": fmt.Sprintf("thread-%d", threads)}}
+			id := fmt.Sprintf("thread-%d", threads)
+			if len(os.Args) == 3 && os.Args[2] == "unique-thread-ids" {
+				id = fmt.Sprintf("thread-%d-%d", os.Getpid(), threads)
+			}
+			result = map[string]any{"thread": map[string]any{"id": id, "cwd": folderRoot, "modelProvider": "fixture", "canAcceptDirectInput": true}, "cwd": folderRoot, "approvalPolicy": "on-request", "sandbox": map[string]any{"type": "workspaceWrite", "writableRoots": []string{folderRoot}, "networkAccess": false}, "modelProvider": "fixture", "model": "fixture-model"}
 		case "turn/start":
 			var params struct {
 				Input []struct {
@@ -1793,17 +1801,13 @@ func TestServicePeer(t *testing.T) {
 			}
 			result = map[string]any{"turn": map[string]string{"id": fmt.Sprintf("turn-%d", turns), "status": "inProgress"}}
 		case "thread/resume":
-			if len(os.Args) == 4 && (os.Args[2] == "expect-cwd" || os.Args[2] == "expect-resume-cwd") {
-				var params struct {
-					Cwd string `json:"cwd"`
-				}
-				if json.Unmarshal(frame.Params, &params) != nil || filepath.Clean(params.Cwd) != filepath.Clean(os.Args[3]) {
-					_ = enc.Encode(map[string]any{"id": frame.ID, "error": map[string]any{"code": -32602, "message": "native resume cwd did not match the original task directory"}})
-					continue
-				}
+			var params map[string]json.RawMessage
+			if json.Unmarshal(frame.Params, &params) != nil || params["cwd"] != nil || params["approvalPolicy"] != nil || params["sandbox"] != nil {
+				_ = enc.Encode(map[string]any{"id": frame.ID, "error": map[string]any{"code": -32602, "message": "resume must preserve native cwd and permissions without overrides"}})
+				continue
 			}
 			forcedStatus, interrupted = "", true
-			result = map[string]any{"thread": map[string]string{"id": "thread-1"}}
+			result = map[string]any{"thread": map[string]any{"id": "thread-1", "cwd": folderRoot, "modelProvider": "fixture", "canAcceptDirectInput": true}, "cwd": folderRoot, "approvalPolicy": "on-request", "sandbox": map[string]any{"type": "workspaceWrite", "writableRoots": []string{folderRoot}, "networkAccess": false}, "modelProvider": "fixture", "model": "fixture-model"}
 		case "turn/steer":
 			result = map[string]string{"turnId": fmt.Sprintf("turn-%d", turns)}
 		case "thread/goal/get":
@@ -1837,7 +1841,7 @@ func TestServicePeer(t *testing.T) {
 			if forcedStatus != "" {
 				state = forcedStatus
 			}
-			result = map[string]any{"thread": map[string]any{"id": "thread-1", "status": map[string]string{"type": state}}}
+			result = map[string]any{"thread": map[string]any{"id": "thread-1", "cwd": folderRoot, "modelProvider": "fixture", "canAcceptDirectInput": true, "status": map[string]string{"type": state}}}
 		case "turn/interrupt":
 			if interrupted {
 				_ = enc.Encode(map[string]any{"id": frame.ID, "error": map[string]any{"code": -32600, "message": "no active turn to interrupt"}})
@@ -1868,6 +1872,12 @@ func TestServicePeer(t *testing.T) {
 				} `json:"input"`
 			}
 			_ = json.Unmarshal(frame.Params, &params)
+			if len(params.Input) > 0 && params.Input[0].Text == "pause goal externally" {
+				goalStatus = "paused"
+				if err := enc.Encode(map[string]any{"method": "thread/goal/updated", "params": map[string]any{"threadId": "thread-1", "goal": map[string]string{"status": "paused"}}}); err != nil {
+					os.Exit(3)
+				}
+			}
 			if len(params.Input) > 0 && params.Input[0].Text == "exit process" {
 				os.Exit(7)
 			}

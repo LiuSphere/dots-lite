@@ -5,6 +5,7 @@ import importlib
 from .client import HubClient, HubError
 from .attachments import InboundAttachments
 from .schemas import TOOL_SCHEMAS
+from .selections import InboundSelections
 
 
 class SourcePlugin:
@@ -12,12 +13,15 @@ class SourcePlugin:
         self.hub = hub
         self.session_context = session_context
         self.attachments = InboundAttachments(media_roots)
+        self.selections = InboundSelections()
 
     def pre_gateway_dispatch(self, *, event, **hook):
         self.attachments.collect(event)
+        self.selections.collect(event)
 
     def post_gateway_admission(self, *, session_key, source, message_id, **hook):
         self.attachments.admit(session_key, source, message_id)
+        self.selections.admit(session_key, source, message_id)
 
     def pre_tool_call(self, *, tool_name="", args=None, **hook):
         if not tool_name.startswith("mcp__dots_lite__"):
@@ -65,6 +69,7 @@ class SourcePlugin:
         try:
             hub = self.hub or HubClient.from_environment()
             private_files = []
+            selection = None
             if tool == "dots_lite_prepare":
                 attachment_source = {
                     "platform": platform, "user_id": source["sender_id"], "chat_id": source["chat_id"],
@@ -73,9 +78,11 @@ class SourcePlugin:
                     "parent_chat_id": read("HERMES_SESSION_PARENT_CHAT_ID", ""),
                 }
                 private_files = self.attachments.bind(bound_reader(), attachment_source, source["message_id"], arguments)
+                selection = self.selections.bind(bound_reader(), attachment_source, source["message_id"], arguments)
             registered = hub.request("POST", "/v1/invocations", {
                 "tool": tool, "arguments": arguments, "source": source,
                 **({"attachment_files": private_files} if private_files else {}),
+                **({"directory_selection": selection} if selection else {}),
             })
             context_ref = registered.get("context_ref", "")
             if not context_ref:

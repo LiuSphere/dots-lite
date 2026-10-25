@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,13 +20,21 @@ import (
 )
 
 type ServiceConfig struct {
-	Scope     protocol.Scope    `json:"scope"`
-	Folders   []protocol.Folder `json:"folders"`
-	StatePath string            `json:"state_path"`
-	Native    Options           `json:"-"`
+	ThreadSourceKinds []string          `json:"-"`
+	SourceSchemaError string            `json:"-"`
+	DirectoryMode     string            `json:"directory_mode,omitempty"`
+	Scope             protocol.Scope    `json:"scope"`
+	Folders           []protocol.Folder `json:"folders"`
+	StatePath         string            `json:"state_path"`
+	Native            Options           `json:"-"`
 }
 
 type Service struct {
+	unlock           func() error
+	maintenanceMu    sync.Mutex
+	hubAcknowledged  bool
+	maintenance      protocol.Maintenance
+	writeGate        sync.RWMutex
 	config           ServiceConfig
 	db               *sql.DB
 	mu               sync.Mutex
@@ -46,18 +55,39 @@ type Service struct {
 }
 
 func NewService(config ServiceConfig) (*Service, error) {
+	if config.DirectoryMode == "" {
+		if len(config.Folders) > 0 {
+			config.DirectoryMode = "allowlist"
+		} else {
+			config.DirectoryMode = "task"
+		}
+	}
+	if config.DirectoryMode != "task" && config.DirectoryMode != "allowlist" {
+		return nil, errors.New("directory_mode must be task or allowlist")
+	}
 	if config.Scope.UserID == "" || config.Scope.ProfileID == "" || config.Scope.ExecutorID == "" || config.StatePath == "" {
 		return nil, errors.New("executor scope and state_path are required")
 	}
 	if err := os.MkdirAll(filepath.Dir(config.StatePath), 0700); err != nil {
 		return nil, err
 	}
+	unlock, err := lockState(config.StatePath)
+	if err != nil {
+		return nil, err
+	}
+	keepLock := false
+	defer func() {
+		if !keepLock {
+			_ = unlock()
+		}
+	}()
 	db, err := sql.Open("sqlite", config.StatePath)
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
 	s := &Service{config: config, db: db, instance: randomID(), roots: map[string]*os.Root{}, taskRoots: map[string]*os.Root{}, folders: map[string]protocol.Folder{}, reconciling: map[string]bool{}, reconcilePending: map[string]protocol.Task{}}
+	s.maintenance = protocol.Maintenance{Phase: "running"}
 	for _, statement := range []string{
 		`PRAGMA journal_mode=WAL`, `PRAGMA busy_timeout=5000`,
 		`CREATE TABLE IF NOT EXISTS executor_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -65,6 +95,7 @@ func NewService(config ServiceConfig) (*Service, error) {
 		`CREATE TABLE IF NOT EXISTS executor_operations (operation_id TEXT PRIMARY KEY, digest TEXT NOT NULL, result TEXT NOT NULL, action TEXT NOT NULL DEFAULT '')`,
 		`CREATE TABLE IF NOT EXISTS executor_events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, payload TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS executor_requests (request_id TEXT PRIMARY KEY, payload TEXT NOT NULL, valid INTEGER NOT NULL)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS executor_thread_binding ON executor_tasks(json_extract(payload,'$.thread_id')) WHERE json_extract(payload,'$.thread_id') IS NOT NULL AND json_extract(payload,'$.thread_id')<>''`,
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			_ = db.Close()
@@ -72,6 +103,37 @@ func NewService(config ServiceConfig) (*Service, error) {
 		}
 	}
 	owner, _ := json.Marshal(config.Scope)
+	var stateProtocol string
+	protocolErr := db.QueryRow(`SELECT value FROM executor_meta WHERE key='state_protocol'`).Scan(&stateProtocol)
+	if errors.Is(protocolErr, sql.ErrNoRows) {
+		var tasks int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM executor_tasks`).Scan(&tasks); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		if tasks > 0 {
+			_ = db.Close()
+			return nil, errors.New("legacy executor state requires an explicit offline protocol 4 migration")
+		}
+		_, protocolErr = db.Exec(`INSERT INTO executor_meta(key,value) VALUES('state_protocol','4')`)
+	} else if protocolErr == nil && stateProtocol != "4" {
+		protocolErr = errors.New("unsupported executor state protocol")
+	}
+	if protocolErr != nil {
+		_ = db.Close()
+		return nil, protocolErr
+	}
+	var maintenanceRaw string
+	err = db.QueryRow(`SELECT value FROM executor_meta WHERE key='maintenance'`).Scan(&maintenanceRaw)
+	if err == nil {
+		if err = json.Unmarshal([]byte(maintenanceRaw), &s.maintenance); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		_ = db.Close()
+		return nil, err
+	}
 	if _, err := db.Exec(`INSERT OR IGNORE INTO executor_meta(key,value) VALUES('scope',?)`, string(owner)); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -116,11 +178,20 @@ func NewService(config ServiceConfig) (*Service, error) {
 		_ = s.Close()
 		return nil, err
 	}
+	s.unlock = unlock
+	keepLock = true
 	return s, nil
 }
 
 func (s *Service) StartNative(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
+	if s.maintenance.Phase != "running" && s.maintenance.Phase != "resuming" {
+		s.mu.Unlock()
+		return errors.New("native restart is disabled during maintenance")
+	}
 	if s.eventFault != nil {
 		fault := s.eventFault
 		s.mu.Unlock()
@@ -132,11 +203,17 @@ func (s *Service) StartNative(ctx context.Context) error {
 	}
 	s.starting = true
 	s.mu.Unlock()
-	childCtx, cancel := context.WithCancel(ctx)
+	// The supervisor can stop before process cleanup. Keep owned native life
+	// separate so cancelling transport loops cannot kill a quiescent process
+	// before Close has closed stdin and confirmed a clean exit.
+	childCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	options := s.config.Native
 	options.ExperimentalAPI = true
 	if options.StartupTimeout == 0 {
 		options.StartupTimeout = 15 * time.Second
+	}
+	if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < options.StartupTimeout {
+		options.StartupTimeout = time.Until(deadline)
 	}
 	client, err := Start(childCtx, options)
 	s.mu.Lock()
@@ -147,15 +224,29 @@ func (s *Service) StartNative(ctx context.Context) error {
 		cancel()
 		return err
 	}
+	if s.maintenance.Phase != "running" && s.maintenance.Phase != "resuming" {
+		cancel()
+		return errors.Join(errors.New("maintenance began during native initialization"), client.Close())
+	}
 	s.client, s.cancel, s.instance = client, cancel, randomID()
 	s.pumpDone = make(chan struct{})
 	s.nativeErr = nil
+	if s.maintenance.Phase == "resuming" && s.hubAcknowledged {
+		if err := s.persistMaintenanceLocked(ctx, "running", nil); err != nil {
+			cancel()
+			return err
+		}
+	}
 	go s.pumpNative(client)
 	return nil
 }
 
 func (s *Service) Execute(ctx context.Context, op protocol.Operation) protocol.Result {
 	result := protocol.Result{OperationID: op.ID, TaskID: op.TaskID, Stage: "failed"}
+	if isWriteAction(op.Action) && op.Action != "task.stop" {
+		s.writeGate.RLock()
+		defer s.writeGate.RUnlock()
+	}
 	if op.Scope != s.config.Scope {
 		return failResult(result, "forbidden", "operation scope does not match executor")
 	}
@@ -186,6 +277,10 @@ func (s *Service) Execute(ctx context.Context, op protocol.Operation) protocol.R
 	if !errors.Is(err, sql.ErrNoRows) {
 		s.mu.Unlock()
 		return failResult(result, "storage", err.Error())
+	}
+	if isWriteAction(op.Action) && op.Action != "task.stop" && (s.maintenance.Phase != "running" || op.MaintenanceEpoch != s.maintenance.Epoch) {
+		s.mu.Unlock()
+		return failResult(result, "maintenance", "write rejected by maintenance epoch or phase")
 	}
 	if s.eventFault != nil && isWriteAction(op.Action) && op.Action != "task.stop" {
 		fault := s.eventFault
@@ -231,6 +326,12 @@ func (s *Service) Execute(ctx context.Context, op protocol.Operation) protocol.R
 
 func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.Result {
 	r := protocol.Result{OperationID: op.ID, TaskID: op.TaskID, Stage: "failed"}
+	if op.Action == "threads.list" || op.Action == "thread.read" {
+		s.mu.Lock()
+		client := s.client
+		s.mu.Unlock()
+		return s.threadQuery(ctx, op, client)
+	}
 	if op.Action == "operation.read" {
 		var data string
 		if err := s.db.QueryRowContext(ctx, `SELECT result FROM executor_operations WHERE operation_id=?`, op.RequestID).Scan(&data); err != nil {
@@ -269,7 +370,7 @@ func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.R
 	if !p.Available && op.Action != "task.stop" && op.Action != "task.read" && op.Action != "task.history" && op.Action != "goal.get" {
 		return failResult(r, "folder_unavailable", "registered folder directory is unavailable or no longer matches its authorized open handle")
 	}
-	if op.TaskID != "" && op.Action != "task.create" {
+	if op.TaskID != "" && op.Action != "task.create" && op.Action != "task.attach" {
 		s.mu.Lock()
 		task, taskErr := s.loadTask(ctx, op.TaskID)
 		s.mu.Unlock()
@@ -306,6 +407,9 @@ func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.R
 	if client == nil {
 		return failResult(r, "not_ready", "app-server is not initialized")
 	}
+	if op.Action == "task.attach" {
+		return s.attachThread(ctx, op, client)
+	}
 	if op.Action == "approval.respond" || op.Action == "question.respond" {
 		return s.respondOperation(ctx, op, client)
 	}
@@ -323,6 +427,9 @@ func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.R
 		return r
 	}
 	directory, directoryErr := workingDirectory(op.WorkingDirectory)
+	if s.config.DirectoryMode == "task" && !filepath.IsAbs(op.WorkingDirectory) {
+		return failResult(r, "needs_directory_selection", "task mode requires an explicitly selected absolute directory")
+	}
 	if directoryErr != nil {
 		return failResult(r, "invalid_working_directory", directoryErr.Error())
 	}
@@ -339,6 +446,7 @@ func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.R
 	}()
 	now := time.Now().UTC()
 	task := protocol.Task{ID: op.TaskID, Scope: op.Scope, Name: op.Name, Objective: op.Input, FolderID: op.FolderID, WorkingDirectory: directory, Version: op.TaskVersion, Execution: "starting", Verification: "pending", Delivery: "pending", Artifacts: op.Artifacts, CreatedAt: now, UpdatedAt: now}
+	task.DirectoryMode = s.config.DirectoryMode
 	if task.Version == 0 {
 		task.Version = 1
 	}
@@ -358,7 +466,7 @@ func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.R
 	if p.Model != "" {
 		params["model"] = p.Model
 	}
-	data, err := client.Call(ctx, "thread/start", params)
+	data, err := s.nativeWrite(ctx, client, op, "thread/start", params)
 	if err != nil {
 		return s.recordNativeFailure(ctx, r, task.ID, err)
 	}
@@ -377,6 +485,36 @@ func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.R
 		r.Stage = "unknown"
 		return failResult(r, "storage", err.Error())
 	}
+	var settings struct {
+		Cwd               string          `json:"cwd"`
+		Reviewer          json.RawMessage `json:"approvalsReviewer"`
+		WorkspaceRoots    json.RawMessage `json:"runtimeWorkspaceRoots"`
+		PermissionProfile json.RawMessage `json:"activePermissionProfile"`
+		ApprovalPolicy    json.RawMessage `json:"approvalPolicy"`
+		Sandbox           json.RawMessage `json:"sandbox"`
+		Model             string          `json:"model"`
+		ModelProvider     string          `json:"modelProvider"`
+	}
+	if err := json.Unmarshal(data, &settings); err != nil || len(settings.ApprovalPolicy) == 0 || len(settings.Sandbox) == 0 {
+		r.Stage = "unknown"
+		return failResult(r, "native_response", "thread/start omitted actual permissions")
+	}
+	if !samePath(cwd, settings.Cwd) {
+		r.Stage = "unknown"
+		return failResult(r, "native_response", "native runtime cwd differs from the selected task directory")
+	}
+	s.mu.Lock()
+	task, err = s.loadTask(ctx, task.ID)
+	if err == nil {
+		task.NativePolicy = mustJSON(map[string]json.RawMessage{"approvalPolicy": settings.ApprovalPolicy, "sandbox": settings.Sandbox, "approvalsReviewer": settings.Reviewer, "runtimeWorkspaceRoots": settings.WorkspaceRoots, "activePermissionProfile": settings.PermissionProfile})
+		task.Model, task.ModelProvider = settings.Model, settings.ModelProvider
+		err = s.saveTask(ctx, task)
+	}
+	s.mu.Unlock()
+	if err != nil {
+		r.Stage = "unknown"
+		return failResult(r, "storage", err.Error())
+	}
 	if task.Paused || task.Version != op.TaskVersion && op.TaskVersion != 0 {
 		r.Data = mustJSON(task)
 		return failResult(r, "paused", "task was paused or replaced before turn submission")
@@ -385,7 +523,7 @@ func (s *Service) execute(ctx context.Context, op protocol.Operation) protocol.R
 	if len(op.OutputSchema) > 0 {
 		turnParams["outputSchema"] = op.OutputSchema
 	}
-	data, err = client.Call(ctx, "turn/start", turnParams)
+	data, err = s.nativeWrite(ctx, client, op, "turn/start", turnParams)
 	if err != nil {
 		return s.recordNativeFailure(ctx, r, task.ID, err)
 	}
@@ -434,8 +572,26 @@ func (s *Service) insertTask(ctx context.Context, task protocol.Task, root strin
 		return err
 	}
 	rows.Close()
-	_, err = s.db.ExecContext(ctx, `INSERT INTO executor_tasks(task_id,payload,folder_root,occupied) VALUES(?,?,?,1)`, task.ID, string(mustJSON(task)), root)
-	return err
+	opened, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	identity, identityErr := directoryIdentity(opened)
+	if err := errors.Join(identityErr, opened.Close()); err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO executor_tasks(task_id,payload,folder_root,occupied) VALUES(?,?,?,1)`, task.ID, string(mustJSON(task)), root); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO executor_meta(key,value) VALUES(?,?)`, "task_root_identity:"+task.ID, identity); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 func rootsOverlap(a, b string) bool { return pathWithin(a, b) || pathWithin(b, a) }
 func pathWithin(root, path string) bool {
@@ -515,6 +671,7 @@ func (s *Service) Snapshot(ctx context.Context) (protocol.Snapshot, error) {
 	s.mu.Unlock()
 	state := protocol.Snapshot{InstanceID: instance, Initialized: native != nil && native.Err() == nil, Folders: []protocol.Folder{}, Tasks: []protocol.Task{}}
 	s.mu.Lock()
+	state.Maintenance = s.maintenance
 	if s.nativeErr != nil {
 		state.Error = s.nativeErr.Error()
 	}
@@ -549,6 +706,9 @@ func (s *Service) Snapshot(ctx context.Context) (protocol.Snapshot, error) {
 // If its path is replaced, keep the handle and report unavailability rather
 // than silently authorizing the replacement directory.
 func (s *Service) folderLocked(id string) (protocol.Folder, bool) {
+	if id == "" && s.config.DirectoryMode == "task" {
+		return protocol.Folder{Available: true, ApprovalPolicy: "on-request", Sandbox: "workspace-write"}, true
+	}
 	p, exists := s.folders[id]
 	if !exists {
 		return p, false
@@ -593,7 +753,14 @@ func (s *Service) Close() error {
 		err = errors.Join(err, root.Close())
 	}
 	if s.db != nil {
+		if err == nil && s.maintenance.Phase == "stopping" {
+			_, err = s.db.Exec(`INSERT INTO executor_meta(key,value) VALUES('shutdown_clean',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, fmt.Sprint(s.maintenance.Epoch))
+		}
 		err = errors.Join(err, s.db.Close())
+	}
+	if s.unlock != nil {
+		err = errors.Join(err, s.unlock())
+		s.unlock = nil
 	}
 	return err
 }
@@ -602,7 +769,7 @@ func failResult(r protocol.Result, code, message string) protocol.Result {
 	return r
 }
 func isWriteAction(action string) bool {
-	return action == "task.create" || action == "task.continue" || action == "turn.steer" || action == "task.stop" || action == "goal.set" || action == "approval.respond" || action == "question.respond" || action == "files.upload"
+	return action == "task.attach" || action == "task.create" || action == "task.continue" || action == "turn.steer" || action == "task.stop" || action == "goal.set" || action == "approval.respond" || action == "question.respond" || action == "files.upload"
 }
 func failNativeResult(r protocol.Result, err error) protocol.Result {
 	var rpc *RPCError

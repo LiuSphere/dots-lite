@@ -9,6 +9,27 @@ import (
 )
 
 func (h *Hub) forwardQuery(ctx context.Context, b Binding, a queryArgs) (json.RawMessage, error) {
+	if a.Query == "threads" || a.Query == "thread" {
+		id, err := randomID("read_")
+		if err != nil {
+			return nil, err
+		}
+		action := "threads.list"
+		if a.Query == "thread" {
+			action = "thread.read"
+		}
+		result, err := h.dispatch(ctx, b, protocol.Operation{ID: id, Scope: b.scope(), Action: action, ThreadID: a.ThreadID, Archived: a.Archived, Cursor: a.Cursor})
+		if err != nil {
+			return nil, err
+		}
+		if result.Error != nil {
+			return nil, result.Error
+		}
+		if result.Stage != "accepted" {
+			return nil, failure(result.Stage, "native query did not complete")
+		}
+		return result.Data, nil
+	}
 	actions := map[string]string{"history": "task.history", "requests": "task.read", "session": "task.read", "goal": "goal.get", "directory": "files.list", "text": "files.read", "download": "files.download"}
 	if a.Query == "folders" {
 		h.mu.Lock()
@@ -84,5 +105,5 @@ func (h *Hub) forwardQuery(ctx context.Context, b Binding, a queryArgs) (json.Ra
 		}
 		return state.Requests, nil
 	}
-	return result.Data, nil
+	return h.observedResult(ctx, b, task, id, action, result.Data)
 }

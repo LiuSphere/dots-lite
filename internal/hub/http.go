@@ -87,6 +87,8 @@ func (h *Hub) APIHandler() http.Handler {
 				break
 			}
 			switch parts[4] {
+			case "submission":
+				result, err = h.BlockUnknownSubmission(r.Context(), uid, parts[3], body)
 			case "run":
 				result, err = h.SaveFollowupRun(r.Context(), uid, parts[3], body)
 			case "report":

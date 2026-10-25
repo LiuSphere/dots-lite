@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"io/fs"
 	"os"
@@ -15,6 +16,9 @@ func workingDirectory(name string) (string, error) {
 	if name == "" {
 		return ".", nil
 	}
+	if filepath.IsAbs(name) && !strings.ContainsRune(name, '\x00') {
+		return filepath.Clean(name), nil
+	}
 	if !fs.ValidPath(name) || strings.ContainsAny(name, "\\:\x00") {
 		return "", errors.New("working_directory must be a relative slash-separated directory inside the authorized folder")
 	}
@@ -25,6 +29,28 @@ func workingDirectory(name string) (string, error) {
 // Its physical name is checked against the same opened directory before it is
 // used for native APIs that can accept only a path.
 func (s *Service) openTaskRootLocked(folderID, directory string) (*os.Root, string, error) {
+	if filepath.IsAbs(directory) {
+		path, err := filepath.EvalSymlinks(directory)
+		if err != nil {
+			return nil, "", err
+		}
+		if s.config.DirectoryMode == "allowlist" {
+			p, ok := s.folderLocked(folderID)
+			if !ok || !p.Available || !pathWithin(p.Root, path) {
+				return nil, "", errors.New("directory is outside the authorized allowlist")
+			}
+		}
+		root, err := os.OpenRoot(path)
+		if err != nil {
+			return nil, "", err
+		}
+		opened, err := root.Stat(".")
+		current, currentErr := os.Stat(directory)
+		if err != nil || currentErr != nil || !os.SameFile(opened, current) {
+			return nil, "", errors.Join(errors.New("directory changed while opening"), err, currentErr, root.Close())
+		}
+		return root, path, nil
+	}
 	p, exists := s.folderLocked(folderID)
 	if !exists || !p.Available {
 		return nil, "", errors.New("authorized folder is unavailable")
@@ -66,6 +92,17 @@ func (s *Service) taskRootLocked(ctx context.Context, task protocol.Task) (*os.R
 	opened, path, err := s.openTaskRootLocked(task.FolderID, task.WorkingDirectory)
 	if err != nil {
 		return nil, "", err
+	}
+	identity, err := directoryIdentity(opened)
+	if err != nil {
+		return nil, "", errors.Join(err, opened.Close())
+	}
+	var stored string
+	if err := s.db.QueryRowContext(ctx, `SELECT value FROM executor_meta WHERE key=?`, "task_root_identity:"+task.ID).Scan(&stored); err != nil || identity != stored {
+		if errors.Is(err, sql.ErrNoRows) {
+			err = errors.New("legacy directory identity is unverified; offline migration is required")
+		}
+		return nil, "", errors.Join(errors.New("task directory identity changed or is unavailable"), err, opened.Close())
 	}
 	relative, compareErr := filepath.Rel(expected, path)
 	if compareErr != nil || relative != "." {

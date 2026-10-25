@@ -21,7 +21,7 @@ func (s *Service) taskOperation(ctx context.Context, op protocol.Operation, clie
 	r.ThreadID, r.TurnID = task.ThreadID, task.TurnID
 	readonly := op.Action == "task.read" || op.Action == "task.history" || op.Action == "goal.get"
 	if !readonly && op.TaskVersion != task.Version {
-		if op.Action != "task.continue" || !task.Paused || op.TaskVersion <= task.Version {
+		if op.Action != "task.continue" || (!task.Paused && !op.Foreground) || op.TaskVersion != task.Version+1 {
 			return failResult(r, "stale_version", "operation version does not match task")
 		}
 	}
@@ -92,7 +92,7 @@ func (s *Service) taskOperation(ctx context.Context, op protocol.Operation, clie
 				return failResult(r, "conflict", err.Error())
 			}
 		}
-		data, err := client.Call(ctx, "thread/goal/set", params)
+		data, err := s.nativeWrite(ctx, client, op, "thread/goal/set", params)
 		if err != nil {
 			return failNativeResult(r, err)
 		}
@@ -118,7 +118,7 @@ func (s *Service) taskOperation(ctx context.Context, op protocol.Operation, clie
 		if task.Execution != "running" {
 			return failResult(r, "stale_turn", "task no longer has the expected active turn")
 		}
-		data, err := client.Call(ctx, "turn/steer", map[string]any{"threadId": task.ThreadID, "expectedTurnId": op.ExpectedTurnID, "input": []map[string]string{{"type": "text", "text": op.Input}}})
+		data, err := s.nativeWrite(ctx, client, op, "turn/steer", map[string]any{"threadId": task.ThreadID, "expectedTurnId": op.ExpectedTurnID, "input": []map[string]string{{"type": "text", "text": op.Input}}})
 		if err != nil {
 			return failNativeResult(r, err)
 		}
@@ -142,6 +142,12 @@ func (s *Service) taskOperation(ctx context.Context, op protocol.Operation, clie
 		if !quietGoal(goalStatus) {
 			return failResult(r, "conflict", "native Goal is active or unknown; do not load it or start a competing turn")
 		}
+		if goalStatus == "usageLimited" || goalStatus == "budgetLimited" {
+			return failResult(r, "resource_limit", "native resource limit requires an explicit user decision; a fresh turn cannot bypass it")
+		}
+		if goalStatus == "paused" && !op.Foreground {
+			return failResult(r, "paused", "background continuation cannot bypass a paused native Goal")
+		}
 		if err := s.claimTask(ctx, task); err != nil {
 			return failResult(r, "conflict", err.Error())
 		}
@@ -155,7 +161,7 @@ func (s *Service) taskOperation(ctx context.Context, op protocol.Operation, clie
 		if directoryErr != nil {
 			return failResult(r, "working_directory_unavailable", directoryErr.Error())
 		}
-		if _, err := client.Call(ctx, "thread/resume", map[string]any{"threadId": task.ThreadID, "cwd": cwd, "approvalPolicy": p.ApprovalPolicy, "sandbox": p.Sandbox, "approvalsReviewer": "user"}); err != nil {
+		if _, err := s.resumePreservingPolicy(ctx, client, op, task, cwd); err != nil {
 			return failNativeResult(r, err)
 		}
 		goalStatus, err = readNativeGoalStatus(ctx, client, task.ThreadID)
@@ -164,6 +170,12 @@ func (s *Service) taskOperation(ctx context.Context, op protocol.Operation, clie
 		}
 		if !quietGoal(goalStatus) {
 			return failResult(r, "conflict", "native Goal owns continuation after the thread was loaded")
+		}
+		if goalStatus == "usageLimited" || goalStatus == "budgetLimited" {
+			return failResult(r, "resource_limit", "native resource limit remains in effect after resume")
+		}
+		if goalStatus == "paused" && !op.Foreground {
+			return failResult(r, "paused", "native Goal is paused after resume; user continuation is required")
 		}
 		status, err = readNativeStatus(ctx, client, task.ThreadID)
 		if err != nil {
@@ -181,7 +193,7 @@ func (s *Service) taskOperation(ctx context.Context, op protocol.Operation, clie
 		if len(op.OutputSchema) > 0 {
 			params["outputSchema"] = op.OutputSchema
 		}
-		data, err := client.Call(ctx, "turn/start", params)
+		data, err := s.nativeWrite(ctx, client, op, "turn/start", params)
 		if err != nil {
 			return s.recordNativeFailure(ctx, r, task.ID, err)
 		}

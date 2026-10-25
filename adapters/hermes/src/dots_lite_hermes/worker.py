@@ -1,6 +1,7 @@
 """External followup transport. Hermes alone owns run admission and execution."""
 
 from urllib.parse import quote
+from datetime import datetime, timezone
 
 from .downloads import materialize_download
 
@@ -48,9 +49,22 @@ class FollowupWorker:
             capability = features.get("runs_idempotency", {})
             if not capability.get("supported") or not capability.get("durable"):
                 raise RuntimeError("Hermes native runs are not durably idempotent; no followup was submitted")
+            retention = capability.get("retention_seconds")
+            offered = followup.get("offered_at")
+            if not isinstance(retention, (int, float)) or retention <= 0 or not offered:
+                raise RuntimeError("Native idempotency retention or first submission time is unverified; no run was submitted")
+            first = datetime.fromisoformat(offered.replace("Z", "+00:00"))
+            if first.tzinfo is None:
+                raise RuntimeError("Followup first submission time requires a timezone")
+            if (datetime.now(timezone.utc) - first).total_seconds() >= retention:
+                self.hub.request("POST", "/v1/followups/" + quote(followup["id"], safe="") + "/submission", {
+                    "error": "Idempotency retention expired with no confirmed run_id; automatic POST replay is disabled",
+                })
+                return True
             request = followup["request"]
             if request.get("session_id") != followup["session_id"]:
                 raise RuntimeError("Followup request does not match its pre-registered API session")
+            self.hub.request("POST", "/v1/followups/" + quote(followup["id"], safe="") + "/submission", {"status": "attempting"})
             accepted = self.runs.request(
                 "POST", "/v1/runs", request, idempotency_key=followup["idempotency_key"],
             )

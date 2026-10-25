@@ -3,10 +3,11 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
-	"time"
 
+	"dots-lite/internal/protocol"
 	"dots-lite/internal/store"
 )
 
@@ -54,8 +55,41 @@ func (h *Hub) record(ctx context.Context, b Binding, inv *invocation, raw json.R
 					}
 				}
 			}
+			if (a.Status == "passed" || a.Status == "failed") && inv.Source.Kind == "api" {
+				var link apiLink
+				if err := tx.Get("api_session", owner(b.scope()), inv.Source.ChatID, &link); err != nil {
+					return err
+				}
+				var f followup
+				if err := tx.Get("followup", owner(b.scope()), link.FollowupID, &f); err != nil {
+					return err
+				}
+				if err := checkEvidenceReferences(tx, b, task, f, evidence["checks"]); err != nil {
+					return err
+				}
+				if a.Status == "passed" {
+					if _, err := closeTaskFaults(tx, b, task, false, "business verification passed with actual result references"); err != nil {
+						return err
+					}
+				}
+			}
 			task.Verification = a.Status
 			task.Evidence = a.Evidence
+			if a.Status == "failed" {
+				var sequence int64
+				err := tx.Get("cursor", owner(b.scope()), "reconcile", &sequence)
+				if err != nil && !errors.Is(err, store.ErrNotFound) {
+					return err
+				}
+				sequence--
+				data, _ := json.Marshal(map[string]any{"reason": "verification_failed", "checks": evidence["checks"]})
+				if err := h.createFollowup(tx, b, task, protocol.Event{Sequence: sequence, Type: "verification/failed", Data: data, TaskID: task.ID, TurnID: task.TurnID, CreatedAt: h.now().UTC()}); err != nil {
+					return err
+				}
+				if err := tx.Put("cursor", owner(b.scope()), "reconcile", sequence); err != nil {
+					return err
+				}
+			}
 		case "delivery":
 			if a.Status == "delivered" {
 				return failure("native_delivery_required", "only confirmed native outbox receipts may mark delivery complete")
@@ -85,7 +119,27 @@ func (h *Hub) record(ctx context.Context, b Binding, inv *invocation, raw json.R
 				if !hasEvidence(evidence["actions"]) || !hasEvidence(evidence["verification"]) {
 					return failure("missing_evidence", "handled followup needs actions and verification")
 				}
+				if err := checkEvidenceReferences(tx, b, task, f, evidence["actions"]); err != nil {
+					return err
+				}
+				if err := checkEvidenceReferences(tx, b, task, f, evidence["verification"]); err != nil {
+					return err
+				}
 				f.Status = "handled"
+				if strings.Contains(f.FaultID, "|unconfirmed_followup|") {
+					if err := closeFault(tx, b, f.FaultID, "handling confirmed by recorded result references"); err != nil {
+						return err
+					}
+				}
+			} else if a.Status == "waiting" {
+				var wait waitCondition
+				if err := decodeArgs(evidence["waiting"], &wait); err != nil {
+					return err
+				}
+				if wait.CheckAt.IsZero() || !wait.CheckAt.After(h.now().UTC()) || (wait.Kind != "time" && wait.Kind != "native_state") || (wait.Kind == "native_state" && wait.NativeStatus == "" && wait.GoalStatus == "") {
+					return failure("invalid_wait", "waiting requires time or native_state, a future check_at and an observable predicate")
+				}
+				f.Status, f.Wait = "waiting", &wait
 			} else if a.Status == "waiting_user" {
 				f.Status = "blocked"
 				task.Waiting = "user_decision"
@@ -105,7 +159,7 @@ func (h *Hub) record(ctx context.Context, b Binding, inv *invocation, raw json.R
 					return err
 				}
 			} else {
-				return failure("invalid_status", "followup status must be handled or waiting_user")
+				return failure("invalid_status", "followup status must be handled, waiting or waiting_user")
 			}
 			f.Evidence = a.Evidence
 			if err = tx.Put("followup", owner(b.scope()), f.ID, f); err != nil {
@@ -115,7 +169,7 @@ func (h *Hub) record(ctx context.Context, b Binding, inv *invocation, raw json.R
 		default:
 			return failure("invalid_arguments", "unknown result record kind")
 		}
-		task.UpdatedAt = time.Now().UTC()
+		task.UpdatedAt = h.now().UTC()
 		if err = tx.Put("task", owner(b.scope()), task.ID, task); err != nil {
 			return err
 		}

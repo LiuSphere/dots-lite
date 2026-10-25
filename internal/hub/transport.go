@@ -27,6 +27,29 @@ type session struct {
 	done     chan struct{}
 }
 
+func (h *Hub) maintenanceState(b Binding) (int64, string) {
+	h.mu.Lock()
+	s := h.sessions[b.ExecutorID]
+	stored := h.maintenance[b.ExecutorID]
+	h.mu.Unlock()
+	if s == nil {
+		if stored.Phase != "" {
+			return stored.Epoch, stored.Phase
+		}
+		return 0, "running"
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	phase := s.snapshot.Maintenance.Phase
+	if stored.Epoch > s.snapshot.Maintenance.Epoch || (stored.Epoch == s.snapshot.Maintenance.Epoch && stored.Phase != "" && stored.Phase != "running") {
+		return stored.Epoch, stored.Phase
+	}
+	if phase == "" {
+		phase = "running"
+	}
+	return s.snapshot.Maintenance.Epoch, phase
+}
+
 func (h *Hub) Close() error {
 	h.closeOnce.Do(func() {
 		h.mu.Lock()
@@ -51,9 +74,10 @@ func (h *Hub) Close() error {
 func (h *Hub) machine(b Binding) map[string]any {
 	h.mu.Lock()
 	s := h.sessions[b.ExecutorID]
+	maintenance := h.maintenance[b.ExecutorID]
 	h.mu.Unlock()
 	if s == nil {
-		return map[string]any{"connected": false, "snapshot": publicSnapshot(protocol.Snapshot{Initialized: false, Folders: []protocol.Folder{}, Tasks: []protocol.Task{}}, b)}
+		return map[string]any{"connected": false, "snapshot": publicSnapshot(protocol.Snapshot{Maintenance: maintenance, Initialized: false, Folders: []protocol.Folder{}, Tasks: []protocol.Task{}}, b)}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -265,7 +289,7 @@ func (h *Hub) submit(ctx context.Context, b Binding, id string) (json.RawMessage
 		if t.Version != o.TaskVersion {
 			return failure("stale_version", "task changed after operation preparation")
 		}
-		if t.Paused && o.Action != "task.stop" && o.Action != "task.continue" {
+		if t.Paused && o.Action != "task.stop" && o.Action != "task.continue" && o.Action != "task.attach" {
 			return failure("paused", "task is paused")
 		}
 		h.mu.Lock()
@@ -274,7 +298,11 @@ func (h *Hub) submit(ctx context.Context, b Binding, id string) (json.RawMessage
 		if !online {
 			return failure("offline", "bound executor is offline")
 		}
-		if t.Paused && o.Action == "task.continue" {
+		epoch, phase := h.maintenanceState(b)
+		if o.Action != "task.stop" && (phase != "running" || epoch != o.MaintenanceEpoch) {
+			return failure("maintenance", "operation belongs to an older maintenance epoch or the executor is paused")
+		}
+		if (t.Paused || businessWaiting(t.Waiting)) && o.Action == "task.continue" {
 			if o.Source.Kind != "gateway" {
 				return failure("paused", "only a gateway user may resume a paused task")
 			}
@@ -348,6 +376,20 @@ func (h *Hub) applyResult(ctx context.Context, b Binding, result protocol.Result
 			return nil
 		}
 		if result.ThreadID != "" {
+			if task.ThreadID != "" && task.ThreadID != result.ThreadID {
+				return failure("binding_conflict", "receipt cannot replace the original native thread")
+			}
+			var bound string
+			err := tx.Get("thread_binding", owner(b.scope()), result.ThreadID, &bound)
+			if err == nil && bound != task.ID {
+				return failure("binding_conflict", "native thread belongs to another business task")
+			}
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return err
+			}
+			if err := tx.Put("thread_binding", owner(b.scope()), result.ThreadID, task.ID); err != nil {
+				return err
+			}
 			task.ThreadID = result.ThreadID
 		}
 		previousTurn := task.TurnID
@@ -355,6 +397,16 @@ func (h *Hub) applyResult(ctx context.Context, b Binding, result protocol.Result
 			task.TurnID = result.TurnID
 		}
 		var native protocol.Task
+		if o.Action == "goal.set" && result.Stage == "accepted" && result.Error == nil {
+			var state struct {
+				Goal *struct {
+					Status string `json:"status"`
+				} `json:"goal"`
+			}
+			if json.Unmarshal(result.Data, &state) == nil {
+				task.GoalActive = state.Goal != nil && state.Goal.Status == "active"
+			}
+		}
 		if len(result.Data) > 0 && json.Unmarshal(result.Data, &native) == nil && native.ID != "" {
 			if native.ID != task.ID {
 				return failure("scope_mismatch", "native receipt task mismatch")
@@ -369,7 +421,13 @@ func (h *Hub) applyResult(ctx context.Context, b Binding, result protocol.Result
 			if native.Execution != "" && (!terminal || previousTurn != native.TurnID || (native.Execution != "running" && native.Execution != "starting" && native.Execution != "unknown")) {
 				task.Execution = native.Execution
 			}
-			task.Waiting = native.Waiting
+			if !businessWaiting(task.Waiting) {
+				task.Waiting = native.Waiting
+			}
+			task.NativePolicy, task.ModelProvider, task.Model = native.NativePolicy, native.ModelProvider, native.Model
+			if o.Action == "task.attach" {
+				task.Paused = true
+			}
 			if len(native.Artifacts) > 0 {
 				task.Artifacts = native.Artifacts
 			}
@@ -380,10 +438,18 @@ func (h *Hub) applyResult(ctx context.Context, b Binding, result protocol.Result
 			}
 		}
 		task.UpdatedAt = time.Now().UTC()
+		if o.Action == "task.attach" && result.Error != nil {
+			if err := queueAttention(tx, b, task, "attach|"+o.ID, "原生会话暂未安全接入："+result.Error.Error()+"。原因以原生错误为准；提供方混用等未核实原因不能当作结论。"); err != nil {
+				return err
+			}
+		}
 		return tx.Put("task", owner(b.scope()), task.ID, task)
 	})
 }
 func (h *Hub) saveEvent(ctx context.Context, b Binding, event protocol.Event) error {
+	if event.Type == "executor/maintenance" && event.TaskID == "" {
+		return h.saveMaintenanceEvent(ctx, b, event)
+	}
 	return h.db.Update(ctx, func(tx *store.Tx) error {
 		if event.Sequence < 1 {
 			return failure("invalid_event", "event sequence must be positive")
@@ -415,6 +481,9 @@ func (h *Hub) saveEvent(ctx context.Context, b Binding, event protocol.Event) er
 			return err
 		}
 		var params struct {
+			Goal *struct {
+				Status string `json:"status"`
+			} `json:"goal"`
 			ThreadID string `json:"threadId"`
 			Turn     struct {
 				ID     string `json:"id"`
@@ -437,7 +506,19 @@ func (h *Hub) saveEvent(ctx context.Context, b Binding, event protocol.Event) er
 		if event.TurnID != "" {
 			task.TurnID = event.TurnID
 		}
+		priorWaiting := task.Waiting
 		switch event.Type {
+		case "thread/goal/updated":
+			if params.Goal != nil {
+				task.GoalActive = params.Goal.Status == "active"
+			}
+		case "thread/goal/cleared":
+			task.GoalActive = false
+		case "task/native_paused":
+			if params.Task.ID != task.ID || params.Task.Scope != b.scope() || !params.Task.Paused || params.Task.Version < task.Version {
+				return failure("invalid_event", "native pause task identity or version differs")
+			}
+			task.Paused, task.Version = true, params.Task.Version
 		case "task/native_exited":
 			if params.Task.ID == task.ID && params.Task.Version == task.Version {
 				task.Execution = "unknown"
@@ -458,6 +539,9 @@ func (h *Hub) saveEvent(ctx context.Context, b Binding, event protocol.Event) er
 			if params.RequestID != "" {
 				task.Waiting = params.RequestID
 			}
+		}
+		if priorWaiting == "user_decision" || priorWaiting == "submission_unknown" || priorWaiting == "migration_review" {
+			task.Waiting = priorWaiting
 		}
 		task.UpdatedAt = time.Now().UTC()
 		task.ProgressAt = task.UpdatedAt

@@ -4,6 +4,8 @@
 
 ## 绑定与工作目录
 
+协议 4 的 task/allowlist 模式见本文末节。下列 folders 与相对目录规则适用于 allowlist 和旧协议 3；部署时按 [SKILL.md 第 0 节](../SKILL.md#0-目录授权与默认权限)核对版本及模式，不通过扩大根目录模拟新机制。
+
 - Hub 配置只用 `bindings[].folder_ids`，执行端只用 `folders=[{id,root,...}]`，ID 对应一致。root 是本机授权根的绝对路径。
 - 当前一个 Linux UID 只有一条 binding，绑定一台 executor，可授权多个根。增加第二台电脑前核对实现是否支持，不能复制同 UID 的 binding 绕过限制。
 - scope 的 user_id/profile_id/executor_id、token、可信来源共同完成配对。执行端主动连接 Hub，不依赖服务器 SSH 登录电脑。重启沿用 token、scope 和 state_path，自动复连。
@@ -54,13 +56,13 @@ Windows Terminal 为默认终端时，仅对 PowerShell 使用 `-WindowStyle Hid
 
 完整适配包目录注册为来源插件，启用时保留原插件。官方 hook 为 pre_gateway_dispatch、post_gateway_admission、pre_tool_call。MCP 名为 dots_lite，七工具为 dots_lite_query、dots_lite_prepare、dots_lite_submit、dots_lite_stop、dots_lite_answer、dots_lite_approve、dots_lite_record。
 
-v0.3.0 只部署当前名称和版本 3 协议。统一 MCP 项 dots_lite、插件 dots-lite、mcp__dots_lite__dots_lite_* 工具、DOTS_LITE_* 环境变量、dots-lite 目录与服务名。旧配置不进入运行时回退；已有部署先在停止写入后备份并离线转换状态，再同步切换双端。核对官方发现与 Tool Search 仅呈现当前 MCP 项及七个工具。
+v0.3.0 使用协议 3；当前 0.4.0.dev0 源码使用协议 4，部署包必须匹配。统一 MCP 项 dots_lite、插件 dots-lite、mcp__dots_lite__dots_lite_* 工具、DOTS_LITE_* 环境变量、dots-lite 目录与服务名。旧配置不进入运行时回退；已有部署先在停止写入后备份并离线转换状态，再同步切换双端。核对官方发现与 Tool Search 仅呈现当前 MCP 项及七个工具。
 
 网关父进程、MCP、worker 使用同一 profile UID、HOME、HERMES_HOME、DOTS_LITE_SOCKET、DOTS_LITE_FILES_DIR。仅给 MCP 子进程写环境变量不够，来源插件在网关父进程中运行。传输副本目录 700、文件 600，各 profile 分开。
 
 合并配置时保留微信/其他平台、已有 MCP、模型、provider 和 Tool Search。使用运行时已有 YAML 解析器，不假定安装了 PyYAML。遇版本不兼容，核对官方接口后报告或准备升级，不修改 Hermes 核心。
 
-原生 API 仅回环监听，每个 profile 独立端口与随机 token。带认证 capabilities 必须报告 runs_idempotency supported=true、durable=true。worker 的 token 文件存同一裸 token，权限 600；URL 使用 API 根地址，指定实际 Hermes Python 与源码。
+原生 API 仅回环监听，每个 profile 独立端口与随机 token。带认证 capabilities 必须报告 runs_idempotency supported=true、durable=true，且 retention_seconds 为正。worker 的 token 文件存同一裸 token，权限 600；URL 使用 API 根地址，指定实际 Hermes Python 与源码。
 
 以实际 UID 做 MCP stdio initialize/list_tools，检查 folders、folder_id、working_directory 字段及官方 discovery/Tool Search 可见性。工具列表成功不证明来源绑定或模型实际调用。
 
@@ -74,8 +76,53 @@ worker 每个 profile 一份，用对应 UID 和 socket 组常驻。启动或 `-
 
 1. **进程和权限**：实际账号、服务状态、单实例、日志、自启正确；未授权 profile 不可连接 socket，其他用户不能读取 Hub 私密数据。日志检查不输出凭据或个人来源。
 2. **配对**：正式 token 建立连接、scope 一致；connected、initialized、错误分别核对。probe 失败保留原错误，不改 provider 掩盖失败。
-3. **目录**：实际 UID 查询的授权根与用户清单完全一致且可用；无任务浏览指定 folder_id 成功，父目录和未授权根拒绝。缺少真实消息上下文时，可明确登记管理员只读 audit，但不能称为微信入站验收。
+3. **目录**：task 模式核对当前可信消息选择的任务目录、实际对象与文件范围；allowlist 模式另核对根清单，无任务浏览指定 folder_id，父目录和未授权根拒绝。缺少真实消息上下文时，可明确登记管理员只读 audit，但不能称为微信入站验收。
 4. **Hermes**：三 hook、七工具、新字段与官方发现正常，API 持久幂等可用。worker 获准启动后检查运行和错误，不为制造健康结果投递任务。
 5. **可选真实流程**：按明确授权在指定目录创建最小任务，核对 cwd、实际文件、继续/停止和所需人工审批。私有副本与原聊天回执分别核对，不以模型文字自报证明完成。
 
 记录已通过、失败、未验证。账号路由超时、未测模型和真人审批等保持各自状态。公开仓库仅保留通用示例、精确代码版本和验证范围。真实路径、账号、地址、UID、来源和服务映射仅保存在仓库外私有记录或已确认忽略的 deployments.local/，其中再交付启停方法、回滚条件与清理结果。
+
+
+## 协议 4 配置与维护
+
+新装在 Hub binding 和执行端配置中都明确设置 `"directory_mode":"task"`，可省略 folders/folder_ids。用户在当前消息提供绝对任务目录；文件操作仍固定到实际打开的目录对象。选择严格白名单时两端设 `allowlist` 并保留 folders/folder_ids；不能让两端模式不同。已有安装缺省且有根清单时仍为 allowlist。
+
+Hub 的 followup_budget 现在限制同次故障的已受理诊断，默认 3；窗口 30 分钟，未知提交最多 24 次补查/传输轮询。正常阶段无任务级次数或一小时上限。原生幂等过期的未知提交不重发。模型调用数无法观察时保持未知，不能用 run 数替代。已有 followup_budget=8 不会自动改成 3，切换时明确该配置的新语义。
+
+执行端启动时使用安装版 Codex 的 generate-json-schema 取得全来源枚举；失败时原生清单返回 source_schema_unverified，不退回部分来源。首次接入保持暂停并展示实际策略，继续须来自后续明确用户消息。对活动写入、原生直接输入受限、提供方和权限差异，保留错误并通知原聊天。
+
+Windows 配置增加 maintenance 对象：
+
+```json
+{
+  "maintenance": {
+    "task_name": "\\DotsLite-Executor-EXAMPLE",
+    "task_executable": "C:\\apps\\dots-lite\\bin\\WindowsServiceLauncher.exe",
+    "task_arguments": "REPLACE_WITH_EXACT_REGISTERED_ACTION_ARGUMENTS"
+  }
+}
+```
+
+从 Get-ScheduledTask 读取真实任务和唯一 action，核对其 SID、路径、完整 Arguments、配置和 scope。参数不能照抄示例。复制 assets/暂停服务.cmd 与 assets/恢复服务.cmd 到 bin；它们使用 ../config/executor.json，不在部署 skill 之外另造后台控制程序。也可在该目录执行：
+
+```powershell
+.\executor.exe maintenance status -config ..\config\executor.json
+.\executor.exe maintenance pause -config ..\config\executor.json
+.\executor.exe maintenance resume -config ..\config\executor.json
+```
+
+暂停禁用原计划任务，写入持久维护屏障，先暂停任务与 Goal、结算旧写，再关闭 native supervisor、owned app-server/子进程和主进程。控制端持有进程句柄核对退出，确认清理收据及离线排他后才登记 stopped。停止失败保持屏障并报告，不以强杀、重新绑定或删除状态替代。恢复前原实例须退出；恢复后每项任务仍暂停。
+
+协议 3 升级须先获准停止旧 Hub、worker、执行端及受管理原生工作，禁用旧启动入口并核对退出。新二进制拒绝直接打开旧业务状态。以原账号执行离线命令，保留原配置、scope、token、目录、ID、摘要、收据和未知操作：
+
+```sh
+hub -config /ABS/hub.json -state /ABS/hub.sqlite -migrate-v3 -offline-confirmed
+```
+
+```powershell
+.\executor.exe maintenance migrate -config ..\config\executor.json -offline-confirmed
+```
+
+两端先创建独立一致备份再事务转换；旧配置必须保留 allowlist，执行端停在 stopped。缺失历史权限的任务保持暂停/待核实，重新接入并展示实际权限后才继续。离线确认是管理员对旧版进程已经停止的确认，新锁不能替代这项核对。旧版不识别新状态，不能在 v4 库上试跑旧二进制。
+
+直接恢复旧快照仅限未受理新业务和控制变化的切换窗口；一旦 v4 接受新写、暂停或授权变更，就保留最新库、维护停写并向前修复，不能用旧备份抹掉新收据与暂停。生产迁移、计划任务实际控制、真实模型/微信及三天运行仍按现场授权和证据验收；本地 fixture 通过不代表这些部署结果。

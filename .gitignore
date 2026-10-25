@@ -21,3 +21,6 @@ __pycache__/
 # Private deployment records and machine-local skill junctions.
 /deployments.local/
 /.claude/skills/
+
+# Local project documentation.
+/docs/

@@ -151,6 +151,10 @@ func Start(ctx context.Context, opts Options) (*Client, error) {
 
 // Call sends a request without retrying it.
 func (c *Client) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	return c.callChecked(ctx, method, params, nil)
+}
+
+func (c *Client) callChecked(ctx context.Context, method string, params any, beforeWrite func() error) (json.RawMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -171,7 +175,7 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 		delete(c.pending, key)
 		c.mu.Unlock()
 	}()
-	err := c.write(ctx, map[string]any{"id": id, "method": method, "params": params}, "")
+	err := c.writeChecked(ctx, map[string]any{"id": id, "method": method, "params": params}, "", beforeWrite)
 	if err != nil {
 		return nil, fmt.Errorf("write app-server request: %w", err)
 	}

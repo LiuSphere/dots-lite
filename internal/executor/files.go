@@ -230,6 +230,9 @@ func attachmentName(name string) bool {
 // Native fs/readFile accepts a path, not an already-authorized open handle.
 // Root.Open supplies the missing atomic traversal restriction for transfer.
 func (s *Service) readFileOperation(ctx context.Context, op protocol.Operation) protocol.Result {
+	if s.config.DirectoryMode == "task" && op.TaskID == "" {
+		return failResult(protocol.Result{OperationID: op.ID, Stage: "failed"}, "task_required", "task directory binding is required for file access")
+	}
 	s.mu.Lock()
 	p, exists := s.folderLocked(op.FolderID)
 	root := s.roots[op.FolderID]

@@ -80,3 +80,12 @@ worker 使用 Hub 已保存的完整 request、session 和 idempotency key。响
 嵌入 `APIServerAdapter` 的测试入口需在同一进程完成官方 MCP discovery，另一进程的发现不会填充当前注册表。直接展示工具与 Tool Search 需分别检查，不为通过测试擅自更改现有配置。
 
 公开验证摘要见[验收记录](../../docs/验收记录.md)。真实会话、任务、来源、凭据与主机目录保存在私有记录中，仓库只保留可重跑脚本和证明范围。
+
+
+## 协议 4 适配（0.4.0.dev0）
+
+Hub、执行端和本包须协调升级。当前消息的可信完整绝对目录或 thread ID 由插件私下登记，API 跟进不能新增目录/原生线程。query=threads/thread 提供原生清单与元信息；prepare action=task.attach 接入原线程并保留暂停，后续明确用户消息才能继续。
+
+跟进提交前登记 /followups/<id>/submission，保留固定 session/key/body。持久幂等期已过而结果未知时停止 POST，已知 run 继续查询。handled 与核验使用实际 observation_id/operation_id，waiting 使用可观察条件和未来 check_at。正常阶段不受整项任务累计次数限制；运行数、提交次数和底层模型请求数分别记录。
+
+维护中的 Hub 不派发新跟进。恢复服务也不会解除任务暂停。源码本地测试通过不代表生产服务、真人审批或微信送达已经验收。

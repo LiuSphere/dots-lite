@@ -21,7 +21,7 @@ class AttachmentTests(unittest.TestCase):
             linked.hardlink_to(private)
             source = {"platform": "weixin", "user_id": "user", "chat_id": "chat"}
             plugin = SourcePlugin(media_roots=lambda: (cache, cache, cache))
-            event = SimpleNamespace(source=SimpleNamespace(to_dict=lambda: source),
+            event = SimpleNamespace(text="", source=SimpleNamespace(to_dict=lambda: source),
                                     message_id="message", media_urls=[str(linked)])
             plugin.pre_gateway_dispatch(event=event)
             with self.assertRaises(ValueError):
@@ -45,7 +45,7 @@ class AttachmentTests(unittest.TestCase):
                 with self.subTest(expire_at_admission=expire_at_admission):
                     plugin = SourcePlugin(hub=Hub(), session_context=session,
                                           media_roots=lambda: (cache, cache, cache))
-                    event = SimpleNamespace(source=SimpleNamespace(to_dict=lambda: source),
+                    event = SimpleNamespace(text="", source=SimpleNamespace(to_dict=lambda: source),
                                             message_id="message", media_urls=[str(path)])
                     with patch("time.monotonic", return_value=100):
                         plugin.pre_gateway_dispatch(event=event)
@@ -84,7 +84,7 @@ class AttachmentTests(unittest.TestCase):
             hub = Hub()
             plugin = SourcePlugin(hub=hub, session_context=session,
                                   media_roots=lambda: (cache, cache, cache))
-            event = SimpleNamespace(source=SimpleNamespace(to_dict=lambda: dict(source)),
+            event = SimpleNamespace(text="", source=SimpleNamespace(to_dict=lambda: dict(source)),
                                     message_id="message-a", media_urls=[str(path)])
             plugin.pre_gateway_dispatch(event=event)
             plugin.post_gateway_admission(session_key="key-a", platform="weixin", source=source,
@@ -144,7 +144,7 @@ class AttachmentTests(unittest.TestCase):
             session = SimpleNamespace(bound_session_key=lambda: "key",
                                       get_session_env=lambda name, default="": values.get(name, default))
             plugin = SourcePlugin(session_context=session, media_roots=lambda: (cache, cache, cache))
-            event = SimpleNamespace(source=SimpleNamespace(to_dict=lambda: source),
+            event = SimpleNamespace(text="", source=SimpleNamespace(to_dict=lambda: source),
                                     message_id="original-message", media_urls=[str(path)])
             plugin.pre_gateway_dispatch(event=event)
             plugin.post_gateway_admission(session_key="key", source=source, message_id="wrong-message")
@@ -165,7 +165,7 @@ class AttachmentTests(unittest.TestCase):
             link.symlink_to(private)
             source = {"platform": "weixin", "user_id": "user", "chat_id": "chat"}
             plugin = SourcePlugin(media_roots=lambda: (cache, cache, cache))
-            event = SimpleNamespace(source=SimpleNamespace(to_dict=lambda: source),
+            event = SimpleNamespace(text="", source=SimpleNamespace(to_dict=lambda: source),
                                     message_id="message", media_urls=[str(link)])
             plugin.pre_gateway_dispatch(event=event)
             with self.assertRaises(OSError):

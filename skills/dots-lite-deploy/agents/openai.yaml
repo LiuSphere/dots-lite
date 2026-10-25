@@ -1,4 +1,4 @@
 interface:
   display_name: "dots-lite 部署"
-  short_description: "收集服务器密钥、部署目录和文件夹授权，完成后台部署与配对验证"
-  default_prompt: "使用 $dots-lite-deploy 部署或更新 dots-lite。先检查已有环境，再询问缺少的密钥路径、部署目录、Hermes profile 和授权文件夹。"
+  short_description: "说明目录授权与默认执行权限，按版本收集参数并完成后台部署与配对验证"
+  default_prompt: "使用 $dots-lite-deploy 部署或更新 dots-lite，先核对版本并说明目录授权和默认权限，再收集缺少的部署参数与当前实现需要的目录范围。"
