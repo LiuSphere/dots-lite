@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -168,6 +169,7 @@ func TestControlPipeWaitsForReplyReceiptAndSurvivesDelayedClientClose(t *testing
 	defer closeControl()
 	name, _ := windows.UTF16PtrFromString(pipeName(path))
 	for i := 0; i < 10; i++ {
+		runtime.GC()
 		var handle windows.Handle
 		for {
 			handle, err = windows.CreateFile(name, windows.GENERIC_READ|windows.GENERIC_WRITE, 0, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OVERLAPPED, 0)

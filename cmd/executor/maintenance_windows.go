@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -213,6 +214,11 @@ func connectControlPipe(ctx context.Context, handle windows.Handle) error {
 	}
 	defer windows.CloseHandle(event)
 	overlap := windows.Overlapped{HEvent: event}
+	// ConnectNamedPipe retains this address after the syscall returns. Keep it
+	// pinned across Go stack growth/shrink and garbage collection while idle.
+	var pinned runtime.Pinner
+	pinned.Pin(&overlap)
+	defer pinned.Unpin()
 	err = windows.ConnectNamedPipe(handle, &overlap)
 	if errors.Is(err, windows.ERROR_PIPE_CONNECTED) || err == nil {
 		return nil
@@ -227,7 +233,16 @@ func connectControlPipe(ctx context.Context, handle windows.Handle) error {
 		}
 		if status == windows.WAIT_OBJECT_0 {
 			var n uint32
-			return windows.GetOverlappedResult(handle, &overlap, &n, false)
+			err := windows.GetOverlappedResult(handle, &overlap, &n, false)
+			if !errors.Is(err, windows.ERROR_IO_INCOMPLETE) {
+				return err
+			}
+			if err := windows.ResetEvent(event); err != nil {
+				return err
+			}
+			if err := windows.GetOverlappedResult(handle, &overlap, &n, false); !errors.Is(err, windows.ERROR_IO_INCOMPLETE) {
+				return err
+			}
 		}
 		if ctx.Err() != nil {
 			_ = windows.CancelIoEx(handle, &overlap)
