@@ -545,7 +545,7 @@ func (s *Service) stopTask(ctx context.Context, op protocol.Operation, client *C
 			return failResult(r, "stop_unconfirmed", "an older native write must settle before protected loading")
 		}
 		s.mu.Lock()
-		_, cwd, rootErr := s.taskRootLocked(ctx, task)
+		_, cwd, rootErr := s.taskRootForStopLocked(ctx, task)
 		s.mu.Unlock()
 		if rootErr != nil {
 			return failResult(r, "stop_unconfirmed", rootErr.Error())

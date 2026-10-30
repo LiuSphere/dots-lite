@@ -25,6 +25,19 @@ func workingDirectory(name string) (string, error) {
 	return name, nil
 }
 
+func openDirectoryRoot(directory, path string) (*os.Root, error) {
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := root.Stat(".")
+	current, currentErr := os.Stat(directory)
+	if err != nil || currentErr != nil || !os.SameFile(opened, current) {
+		return nil, errors.Join(errors.New("directory changed while opening"), err, currentErr, root.Close())
+	}
+	return root, nil
+}
+
 // The authorized root, not a string prefix, resolves the selected directory.
 // Its physical name is checked against the same opened directory before it is
 // used for native APIs that can accept only a path.
@@ -40,14 +53,9 @@ func (s *Service) openTaskRootLocked(folderID, directory string) (*os.Root, stri
 				return nil, "", errors.New("directory is outside the authorized allowlist")
 			}
 		}
-		root, err := os.OpenRoot(path)
+		root, err := openDirectoryRoot(directory, path)
 		if err != nil {
 			return nil, "", err
-		}
-		opened, err := root.Stat(".")
-		current, currentErr := os.Stat(directory)
-		if err != nil || currentErr != nil || !os.SameFile(opened, current) {
-			return nil, "", errors.Join(errors.New("directory changed while opening"), err, currentErr, root.Close())
 		}
 		return root, path, nil
 	}
@@ -93,6 +101,29 @@ func (s *Service) taskRootLocked(ctx context.Context, task protocol.Task) (*os.R
 	if err != nil {
 		return nil, "", err
 	}
+	return s.verifyTaskRootLocked(ctx, task, opened, path, expected)
+}
+
+// Stopping an existing thread must remain possible after its grant changes.
+// This opens only the persisted directory for native stop inspection; business
+// writes and file operations must still use taskRootLocked and the allowlist.
+func (s *Service) taskRootForStopLocked(ctx context.Context, task protocol.Task) (*os.Root, string, error) {
+	var expected string
+	if err := s.db.QueryRowContext(ctx, `SELECT folder_root FROM executor_tasks WHERE task_id=?`, task.ID).Scan(&expected); err != nil {
+		return nil, "", err
+	}
+	path, err := filepath.EvalSymlinks(expected)
+	if err != nil {
+		return nil, "", err
+	}
+	opened, err := openDirectoryRoot(expected, path)
+	if err != nil {
+		return nil, "", err
+	}
+	return s.verifyTaskRootLocked(ctx, task, opened, path, expected)
+}
+
+func (s *Service) verifyTaskRootLocked(ctx context.Context, task protocol.Task, opened *os.Root, path, expected string) (*os.Root, string, error) {
 	identity, err := directoryIdentity(opened)
 	if err != nil {
 		return nil, "", errors.Join(err, opened.Close())

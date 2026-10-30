@@ -1634,6 +1634,9 @@ func TestServicePeer(t *testing.T) {
 	if len(os.Args) == 4 && os.Args[2] == "expect-resume-cwd" {
 		folderRoot = os.Args[3]
 	}
+	if len(os.Args) == 4 && os.Args[2] == "expect-unloaded-cwd" {
+		folderRoot, forcedStatus = os.Args[3], "notLoaded"
+	}
 	var control net.Conn
 	var pendingTurnID json.RawMessage
 	var pendingGoalID json.RawMessage
@@ -1708,6 +1711,9 @@ func TestServicePeer(t *testing.T) {
 		case "initialize":
 			result = map[string]string{"userAgent": "service-peer/1"}
 		case "thread/start":
+			if len(os.Args) == 4 && os.Args[2] == "expect-unloaded-cwd" {
+				os.Exit(8)
+			}
 			if len(os.Args) == 4 && os.Args[2] == "expect-resume-cwd" {
 				_ = enc.Encode(map[string]any{"id": frame.ID, "error": map[string]any{"code": -32602, "message": "continuation must resume the existing thread"}})
 				continue
@@ -1750,6 +1756,9 @@ func TestServicePeer(t *testing.T) {
 			}
 			result = map[string]any{"thread": map[string]any{"id": id, "cwd": folderRoot, "modelProvider": "fixture", "canAcceptDirectInput": true}, "cwd": folderRoot, "approvalPolicy": "on-request", "sandbox": map[string]any{"type": "workspaceWrite", "writableRoots": []string{folderRoot}, "networkAccess": false}, "modelProvider": "fixture", "model": "fixture-model"}
 		case "turn/start":
+			if len(os.Args) == 4 && os.Args[2] == "expect-unloaded-cwd" {
+				os.Exit(8)
+			}
 			var params struct {
 				Input []struct {
 					Text string `json:"text"`

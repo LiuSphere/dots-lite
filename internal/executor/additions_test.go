@@ -180,6 +180,143 @@ func TestMaintenanceLoadsUnloadedTaskUnderNativeWriterProtectionWithoutStartingT
 	}
 }
 
+func TestPauseUsesOriginalTaskDirectoryAfterAuthorizedRootChanges(t *testing.T) {
+	for _, action := range []string{"task.stop", "maintenance"} {
+		for _, scenario := range []string{"root", "child", "absolute", "missing", "replaced"} {
+			t.Run(action+"/"+scenario, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				cfg := serviceConfig(t)
+				parent := t.TempDir()
+				original := filepath.Join(parent, "original")
+				if err := os.Mkdir(original, 0700); err != nil {
+					t.Fatal(err)
+				}
+				cfg.Folders[0].Root = original
+				directory, cwd := ".", original
+				if scenario == "child" {
+					directory, cwd = "child", filepath.Join(original, "child")
+					if err := os.Mkdir(cwd, 0700); err != nil {
+						t.Fatal(err)
+					}
+				} else if scenario == "absolute" {
+					directory = original
+				}
+				s, err := executor.NewService(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = s.Close() })
+				if err := s.StartNative(ctx); err != nil {
+					t.Fatal(err)
+				}
+				op := protocol.Operation{ID: "create", TaskID: "task", Scope: cfg.Scope, FolderID: "test", WorkingDirectory: directory, TaskVersion: 1, Action: "task.create", Input: "work"}
+				created := s.Execute(ctx, op)
+				if created.Stage != "accepted" {
+					t.Fatalf("create: %+v", created)
+				}
+				var before protocol.Task
+				if err := json.Unmarshal(created.Data, &before); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if scenario == "missing" || scenario == "replaced" {
+					if err := os.Rename(original, filepath.Join(parent, "retired")); err != nil {
+						t.Fatal(err)
+					}
+					if scenario == "replaced" {
+						if err := os.Mkdir(original, 0700); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				cfg.Folders[0].Root = t.TempDir()
+				if err := os.Mkdir(filepath.Join(cfg.Folders[0].Root, "child"), 0700); err != nil {
+					t.Fatal(err)
+				}
+				cfg.Native.Command = append(cfg.Native.Command, "expect-unloaded-cwd", cwd)
+				restarted, err := executor.NewService(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer restarted.Close()
+				if err := restarted.StartNative(ctx); err != nil {
+					t.Fatal(err)
+				}
+				for _, operation := range []string{"files.list", "files.read", "files.download", "files.upload", "task.continue"} {
+					denied := protocol.Operation{ID: "denied-" + operation, TaskID: op.TaskID, Scope: cfg.Scope, FolderID: op.FolderID, TaskVersion: 2, Action: operation, Input: "continue", Path: "report.txt"}
+					if result := restarted.Execute(ctx, denied); result.Error == nil || result.Error.Code != "working_directory_unavailable" {
+						t.Fatalf("changed allowlist allowed %s: %+v", operation, result)
+					}
+				}
+				var pauseErr error
+				if action == "maintenance" {
+					pauseErr = restarted.PauseForMaintenance(ctx)
+				} else {
+					op.ID, op.Action, op.TaskVersion = "stop", "task.stop", 2
+					result := restarted.Execute(ctx, op)
+					if result.Error != nil {
+						pauseErr = result.Error
+					} else if result.Stage != "accepted" {
+						t.Fatalf("stop was not confirmed: %+v", result)
+					}
+				}
+				unsafe := scenario == "missing" || scenario == "replaced"
+				if unsafe && (pauseErr == nil || !strings.Contains(pauseErr.Error(), "stop_unconfirmed")) {
+					t.Fatalf("unavailable original directory accepted: %v", pauseErr)
+				}
+				if !unsafe && pauseErr != nil {
+					t.Fatalf("unchanged original directory blocked pause: %v", pauseErr)
+				}
+				snapshot, err := restarted.Snapshot(ctx)
+				if err != nil || len(snapshot.Tasks) != 1 {
+					t.Fatalf("snapshot: %+v %v", snapshot, err)
+				}
+				task := snapshot.Tasks[0]
+				if !task.Paused || task.WorkingDirectory != directory || task.ThreadID != before.ThreadID || string(task.NativePolicy) != string(before.NativePolicy) {
+					t.Fatalf("pause changed directory, identity or permissions: %+v", task)
+				}
+				if !unsafe && (task.Execution != "stopped" || task.Version != 2) {
+					t.Fatalf("task did not finish pausing: %+v", task)
+				}
+				if action == "maintenance" {
+					phase := "stopping"
+					if unsafe {
+						phase = "failed"
+					}
+					if snapshot.Maintenance.Phase != phase {
+						t.Fatalf("maintenance phase: %+v", snapshot.Maintenance)
+					}
+				}
+				read := protocol.Operation{ID: "read-after-pause", TaskID: op.TaskID, Scope: cfg.Scope, FolderID: op.FolderID, Action: "files.list"}
+				if result := restarted.Execute(ctx, read); result.Error == nil || result.Error.Code != "working_directory_unavailable" {
+					t.Fatalf("pause granted file access to the old directory: %+v", result)
+				}
+				if err := restarted.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if action == "maintenance" && !unsafe {
+					state, err := executor.CompleteOfflineMaintenance(ctx, cfg.StatePath, false)
+					if err != nil || state.Phase != "stopped" {
+						t.Fatalf("maintenance did not confirm clean exit: %+v %v", state, err)
+					}
+				}
+				db, err := sql.Open("sqlite", cfg.StatePath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer db.Close()
+				var stored string
+				if err := db.QueryRow(`SELECT folder_root FROM executor_tasks WHERE task_id=?`, op.TaskID).Scan(&stored); err != nil || stored != cwd {
+					t.Fatalf("pause rebound stored task directory: %q %v", stored, err)
+				}
+			})
+		}
+	}
+}
+
 func TestTaskModeDoesNotNeedFolderRegistrationAndPersistsDirectoryIdentity(t *testing.T) {
 	cfg := serviceConfig(t)
 	cfg.DirectoryMode = "task"

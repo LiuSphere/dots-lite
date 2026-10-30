@@ -77,7 +77,11 @@ func (s *Service) nativeWrite(ctx context.Context, client *Client, op protocol.O
 			if (!futureResume && task.Version != op.TaskVersion) || (task.Paused && method != "thread/resume") {
 				return errors.New("task paused or version changed before native submission")
 			}
-			_, _, err = s.taskRootLocked(ctx, task)
+			if method == "thread/resume" && op.Action == "task.stop" {
+				_, _, err = s.taskRootForStopLocked(ctx, task)
+			} else {
+				_, _, err = s.taskRootLocked(ctx, task)
+			}
 			if err != nil {
 				return err
 			}
